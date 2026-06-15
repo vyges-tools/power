@@ -1,0 +1,10 @@
+design:        counter
+netlist:       counter.v
+lib:           counter.lib
+clock:         clk 10.0        # 100 MHz
+vdd:           1.8
+spef:          counter.spef    # REAL extracted wire caps (vyges-extract run counter.ext)
+vcd:           counter.vcd     # vectored activity
+activity:      0.2             # vectorless fallback for nets absent from VCD/SPEF
+emit_activity: counter.activity
+# counter.spef was produced by:  vyges-extract run examples/counter/counter.ext -o counter.spef

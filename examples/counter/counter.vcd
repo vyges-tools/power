@@ -1,0 +1,61 @@
+$timescale 1ns $end
+$scope module counter $end
+$var wire 1 ! clk_in $end
+$var wire 1 @ clk $end
+$var wire 1 # d $end
+$var wire 1 % n0 $end
+$var wire 1 & y $end
+$var wire 1 ( q0 $end
+$var wire 1 ) q1 $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+0!
+0@
+0#
+1%
+0&
+0(
+0)
+$end
+#5
+1!
+1@
+#10
+0!
+0@
+1#
+0%
+#15
+1!
+1@
+1&
+#20
+0!
+0@
+1(
+#25
+1!
+1@
+0#
+1%
+#30
+0!
+0@
+0&
+#35
+1!
+1@
+1)
+0(
+#40
+0!
+0@
+0%
+#45
+1!
+1@
+1&
+#50
+0!
+0@

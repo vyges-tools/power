@@ -1,0 +1,12 @@
+/* Illustrative tech LEF for the em-ir grid. RPERSQ is deliberately coarse so a
+   5-cell block produces a *visible* droop — absolute values are not physical; the
+   point is the worst-case vs measured-activity RATIO. A real chip (the m0 counter)
+   shows the large absolute droops. */
+LAYER met5
+  RESISTANCE RPERSQ 200.0 ;
+  WIDTH 1.0 ;
+END met5
+LAYER met4
+  RESISTANCE RPERSQ 200.0 ;
+  WIDTH 1.0 ;
+END met4

@@ -1,0 +1,50 @@
+*SPEF "IEEE 1481-1999"
+*DESIGN "counter"
+*VENDOR "Vyges"
+*PROGRAM "vyges-extract"
+*VERSION "0.0.1"
+*DIVIDER /
+*DELIMITER :
+*BUS_DELIMITER [ ]
+*T_UNIT 1 PS
+*C_UNIT 1 FF
+*R_UNIT 1 OHM
+*L_UNIT 1 HENRY
+
+*NAME_MAP
+*1 clk
+*2 n0
+*3 clkbuf
+*4 ff0
+*5 ff1
+*6 u0
+*7 u1
+
+*D_NET *1 0.456512
+*CONN
+*I *3:X I
+*I *4:CLK I
+*I *5:CLK I
+*CAP
+1 *3:X 0.225000
+2 *4:CLK 0.112500
+3 *5:CLK 0.112500
+4 *1 *2 0.006512
+*RES
+1 *1 *3:X 5.025000
+2 *1 *4:CLK 2.512500
+3 *1 *5:CLK 2.512500
+*END
+
+*D_NET *2 0.086912
+*CONN
+*I *6:Y I
+*I *7:A I
+*CAP
+1 *6:Y 0.040200
+2 *7:A 0.040200
+*RES
+1 *2 *6:Y 1.970000
+2 *2 *7:A 1.970000
+*END
+

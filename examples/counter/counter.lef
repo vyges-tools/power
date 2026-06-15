@@ -1,0 +1,24 @@
+# Minimal tech LEF — default routing widths (um), sky130-class (illustrative).
+VERSION 5.8 ;
+
+LAYER li1
+   TYPE ROUTING ;
+   WIDTH 0.17 ;
+END li1
+
+LAYER met1
+   TYPE ROUTING ;
+   WIDTH 0.14 ;
+END met1
+
+LAYER met2
+   TYPE ROUTING ;
+   WIDTH 0.14 ;
+END met2
+
+LAYER met3
+   TYPE ROUTING ;
+   WIDTH 0.30 ;
+END met3
+
+END LIBRARY

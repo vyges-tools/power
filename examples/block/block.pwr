@@ -1,0 +1,10 @@
+design:           block
+netlist:          block.v
+lib:              tiny.lib
+clock:            clk 10.0       # 10 ns period -> 100 MHz
+vdd:              1.8
+vcd:              block.vcd      # vectored activity (omit to use the vectorless factor)
+activity:         0.2            # vectorless fallback for nets absent from the VCD
+default_wire_cap: 0.001          # pF added per net (crude wire-cap stand-in)
+power_budget_mw:  1.0            # --fail-on-budget gate
+emit_activity:    block.activity # per-instance map for vyges-em-ir

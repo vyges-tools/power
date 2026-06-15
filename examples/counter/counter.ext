@@ -1,0 +1,6 @@
+design:   counter
+def:      counter.def       # routed layout (geometry source)
+rules:    sky130.rules      # per-layer RC coefficients
+lef:      counter.lef       # per-layer routing widths -> edge-to-edge coupling gaps
+corner:   typical
+temp:     25

@@ -1,0 +1,14 @@
+VERSION 5.8 ;
+DESIGN counter ;
+UNITS DISTANCE MICRONS 1000 ;
+
+NETS 2 ;
+- clk ( clkbuf X ) ( ff0 CLK ) ( ff1 CLK )
+  + ROUTED met1 ( 1000 2000 ) ( 1000 5000 )
+    NEW met2 ( 1000 5000 ) M1M2_VIA ( 4000 5000 ) ;
+- n0 ( u0 Y ) ( u1 A )
+  + ROUTED met1 ( 2000 2000 ) ( 2000 2800 )
+    NEW li1 ( 2000 2800 ) ( 2300 2800 ) ;
+END NETS
+
+END DESIGN

@@ -1,0 +1,10 @@
+design:        counter
+netlist:       counter.v
+lib:           counter.lib
+clock:         clk 10.0
+vdd:           1.8
+spef:          counter.spef
+# NO vcd -> vectorless; activity 2.0 = every net toggles ~twice per cycle
+# (clock-like) -> the worst-case-simultaneous current em-ir assumes by default.
+activity:      2.0
+emit_activity: counter_worst.activity

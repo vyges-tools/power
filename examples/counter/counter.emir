@@ -1,0 +1,9 @@
+design:        counter
+def:           counter_pdn.def
+lef:           counter_pdn.lef
+pad_layer:     met5
+vdd:           1.8
+via_res:       500.0
+ir_limit_pct:  5.0
+# per-instance current from vyges-power's MEASURED activity (VCD)
+current_map:   counter.activity

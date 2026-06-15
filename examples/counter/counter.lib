@@ -1,0 +1,35 @@
+/* Tiny demo library for the counter example (NOT a real PDK).
+   Units: leakage nW, caps pF, internal_power values in (nW*ns)=1e-18 J, 1.8 V. */
+library (tiny_counter) {
+  leakage_power_unit : 1nW;
+  time_unit : "1ns";
+  current_unit : "1nA";   /* energy unit V·I·t = 1e-18 J (synthetic demo scale) */
+  capacitive_load_unit (1, pf);
+  nom_voltage : 1.8;
+
+  cell (CLKBUF) {
+    cell_leakage_power : 4.0;
+    pin (A) { direction : input;  capacitance : 0.005; }
+    pin (X) { direction : output;
+      internal_power () { rise_power(t){ values("0.020"); } fall_power(t){ values("0.020"); } } }
+  }
+  cell (INV) {
+    cell_leakage_power : 2.0;
+    pin (A) { direction : input;  capacitance : 0.003; }
+    pin (Y) { direction : output;
+      internal_power () { rise_power(t){ values("0.010"); } fall_power(t){ values("0.010"); } } }
+  }
+  cell (BUF) {
+    cell_leakage_power : 2.5;
+    pin (A) { direction : input;  capacitance : 0.004; }
+    pin (Y) { direction : output;
+      internal_power () { rise_power(t){ values("0.012"); } fall_power(t){ values("0.012"); } } }
+  }
+  cell (DFF) {
+    cell_leakage_power : 6.0;
+    pin (CK) { direction : input;  capacitance : 0.006; }
+    pin (D)  { direction : input;  capacitance : 0.004; }
+    pin (Q)  { direction : output;
+      internal_power () { rise_power(t){ values("0.030"); } fall_power(t){ values("0.030"); } } }
+  }
+}

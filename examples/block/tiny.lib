@@ -1,0 +1,38 @@
+/* Tiny demo power library for vyges-power examples (NOT a real PDK).
+   Units: leakage in nW, caps in pF, internal_power values in (nW*ns)=1e-18 J, 1.8 V. */
+library (tiny) {
+  leakage_power_unit : 1nW;
+  time_unit : "1ns";
+  current_unit : "1nA";   /* energy unit V·I·t = 1e-18 J (synthetic demo scale) */
+  capacitive_load_unit (1, pf);
+  nom_voltage : 1.8;
+
+  cell (NAND2) {
+    cell_leakage_power : 3.0;
+    pin (A) { direction : input;  capacitance : 0.004; }
+    pin (B) { direction : input;  capacitance : 0.004; }
+    pin (Y) { direction : output;
+      internal_power () { related_pin : "A";
+        rise_power (t) { values("0.015, 0.017"); }
+        fall_power (t) { values("0.013, 0.015"); } } }
+  }
+
+  cell (INV) {
+    cell_leakage_power : 2.0;
+    pin (A) { direction : input;  capacitance : 0.003; }
+    pin (Y) { direction : output;
+      internal_power () { related_pin : "A";
+        rise_power (t) { values("0.010"); }
+        fall_power (t) { values("0.010"); } } }
+  }
+
+  cell (DFF) {
+    cell_leakage_power : 6.0;
+    pin (CK) { direction : input;  capacitance : 0.006; }
+    pin (D)  { direction : input;  capacitance : 0.004; }
+    pin (Q)  { direction : output;
+      internal_power () { related_pin : "CK";
+        rise_power (t) { values("0.030, 0.034"); }
+        fall_power (t) { values("0.028, 0.032"); } } }
+  }
+}
