@@ -1,5 +1,6 @@
 /target
 *.rpt
 *.activity
+*.flp
 dist/
 obj_dir/

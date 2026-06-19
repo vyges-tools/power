@@ -1,0 +1,10 @@
+# Cell placements for the counter block (µm), roughly matching counter.def's
+# routing. run_loop.sh joins this with vyges-power's per-instance current to build
+# counter.flp (power = current × vdd), so vyges-thermal consumes the SAME power
+# map as em-ir — power -> {em-ir IR-drop, thermal hotspot} on one design.
+# name    x_um  y_um  w_um  h_um
+clkbuf    1.0   1.0   1.5   1.2
+u0        3.5   1.0   1.0   1.2
+u1        3.5   3.0   1.0   1.2
+ff0       1.0   3.5   2.0   1.2
+ff1       3.2   4.5   2.0   1.2

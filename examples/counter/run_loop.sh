@@ -19,12 +19,15 @@ cd "$(dirname "$0")"
 ROOT=../../..
 PWR="$ROOT/vyges-tools-power"
 EMIR="$ROOT/vyges-tools-em-ir"
+THERMAL="$ROOT/vyges-tools-thermal"
 
-echo "building vyges-power + vyges-em-ir…"
-( cd "$PWR"  && cargo build --quiet )
-( cd "$EMIR" && cargo build --quiet )
+echo "building vyges-power + vyges-em-ir + vyges-thermal…"
+( cd "$PWR"     && cargo build --quiet )
+( cd "$EMIR"    && cargo build --quiet )
+( cd "$THERMAL" && cargo build --quiet )
 P="$PWR/target/debug/vyges-power"
 E="$EMIR/target/debug/vyges-em-ir"
+T="$THERMAL/target/debug/vyges-thermal"
 
 # 0) Real activity from a gate-level simulation: Verilator --trace-saif emits a SAIF
 #    over the netlist's nets. Regenerate it when a simulator is available; otherwise
@@ -58,3 +61,17 @@ echo
 echo "=> the worst-case-simultaneous assumption overpredicts the droop; vyges-power's"
 echo "   measured per-instance activity — from a VCD or a Verilator --trace-saif SAIF —"
 echo "   gives the realistic, lower droop."
+
+# 4) The SAME vyges-power map, landed on the die as HEAT: power -> vyges-thermal.
+#    counter.flp = placement (counter.place) joined with measured power
+#    (current × vdd from counter.activity). vdd = 1.8 V (counter.pwr).
+echo
+echo "4) vyges-power activity -> vyges-thermal (same map, as heat):"
+awk 'FNR==NR { if ($0 !~ /^#/ && NF>=5) { x[$1]=$2; y[$1]=$3; w[$1]=$4; h[$1]=$5 } next }
+     $0 !~ /^#/ && ($1 in x) { printf "%s %s %s %s %s %.9f\n", $1, x[$1], y[$1], w[$1], h[$1], $2*1.8 }' \
+     counter.place counter.activity > counter.flp
+"$T" run counter.thermal | sed -n '1,7p;/temperature map/,$p'
+echo
+echo "=> power -> {em-ir IR-drop, thermal hotspot} from one shared activity map."
+echo "   The counter draws µW so the rise is sub-mK — the hotspot LOCALIZES to"
+echo "   clkbuf (the dominant cell); absolute heating needs watt-scale power density."
