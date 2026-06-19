@@ -8,17 +8,19 @@
 //! lib:           sky130_hd.lib      # one or more (comma-separated)
 //! clock:         clk 10.0           # clock port + period (ns) -> frequency
 //! vdd:           1.8                # supply voltage (V); optional, else from the lib
-//! vcd:           block.vcd          # optional: vectored activity (real toggle counts)
-//! activity:      0.2                # vectorless default toggle factor (used when no vcd)
+//! vcd:           block.vcd          # optional: vectored activity (VCD toggle counts)
+//! saif:          block.saif         # optional: vectored activity (SAIF); exclusive with vcd
+//! activity:      0.2                # vectorless default toggle factor (used when no vcd/saif)
 //! default_wire_cap: 0.0             # pF added to every net's switched cap (optional)
 //! power_budget_mw:  5.0             # optional CI gate (--fail-on-budget)
 //! emit_activity: block.activity     # optional: write the per-instance map em-ir consumes
 //! ```
 //!
-//! `vcd` (vectored) and `activity` (vectorless) are the two activity sources: a
-//! VCD gives measured per-net toggle rates; without one the engine falls back to
-//! the `activity` factor × clock for every net. The `emit_activity` output is the
-//! seam into `vyges-em-ir` — see `docs/engines-integration.md`.
+//! Activity has two vectored sources — a **VCD** or a **SAIF** (`saif`, e.g.
+//! Verilator `--trace-saif`); give at most one. Both yield measured per-net toggle
+//! rates; without either, the engine falls back to the vectorless `activity` factor
+//! × clock for every net. The `emit_activity` output is the seam into `vyges-em-ir`
+//! — see `docs/engines-integration.md`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -31,7 +33,8 @@ pub struct PwrJob {
     pub clock_port: String,
     pub period_ns: f64,
     pub vdd: Option<f64>,             // supply (V); None -> take the lib's nominal
-    pub vcd: Option<String>,          // vectored activity source
+    pub vcd: Option<String>,          // vectored activity source (VCD)
+    pub saif: Option<String>,         // vectored activity source (SAIF); exclusive with vcd
     pub spef: Option<String>,         // extracted wire parasitics (from vyges-extract)
     pub activity_factor: f64,         // vectorless default toggle factor (0..1), default 0.2
     pub default_wire_cap_pf: f64,     // pF added per net (crude wire-cap stand-in)
@@ -41,6 +44,18 @@ pub struct PwrJob {
 }
 
 impl PwrJob {
+    /// Human-readable activity source for status lines (`saif:…`, the VCD path, or
+    /// `vectorless`).
+    pub fn activity_desc(&self) -> String {
+        if let Some(s) = &self.saif {
+            format!("saif:{s}")
+        } else if let Some(v) = &self.vcd {
+            v.clone()
+        } else {
+            "vectorless".to_string()
+        }
+    }
+
     /// Clock frequency in Hz, derived from the period (ns).
     pub fn freq_hz(&self) -> f64 {
         if self.period_ns > 0.0 {
@@ -102,6 +117,12 @@ impl PwrJob {
         }
         let (clock_port, period_ns) = clock.ok_or_else(|| JobError("missing key: clock".into()))?;
 
+        let vcd = kv.get("vcd").filter(|s| !s.is_empty()).cloned();
+        let saif = kv.get("saif").filter(|s| !s.is_empty()).cloned();
+        if vcd.is_some() && saif.is_some() {
+            return Err(JobError("specify only one vectored source: 'vcd' or 'saif'".into()));
+        }
+
         Ok(PwrJob {
             design: get("design")?,
             netlist: get("netlist")?,
@@ -109,7 +130,8 @@ impl PwrJob {
             clock_port,
             period_ns,
             vdd: kv.get("vdd").and_then(|s| s.parse().ok()),
-            vcd: kv.get("vcd").filter(|s| !s.is_empty()).cloned(),
+            vcd,
+            saif,
             spef: kv.get("spef").filter(|s| !s.is_empty()).cloned(),
             activity_factor: num("activity", 0.2)?,
             default_wire_cap_pf: num("default_wire_cap", 0.0)?,

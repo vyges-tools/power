@@ -23,9 +23,9 @@ usage:
   vyges-power demo       [-o OUT] [--json]
 
 A JOB is a small declarative `.pwr` file (netlist + lib(s) + clock + activity).
-With `vcd:` it uses measured per-net toggle rates; otherwise a vectorless
-`activity:` factor × clock. With `emit_activity:` it writes the per-instance
-map that vyges-em-ir consumes (closing char -> power -> em-ir).
+With `vcd:` or `saif:` it uses measured per-net toggle rates; otherwise a
+vectorless `activity:` factor × clock. With `emit_activity:` it writes the
+per-instance map that vyges-em-ir consumes (closing char -> power -> em-ir).
 
 flags:
   -o FILE             write the report to FILE (default: stdout)
@@ -194,7 +194,7 @@ fn main() {
                     j.libs.len(),
                     j.clock_port,
                     j.period_ns,
-                    j.vcd.as_deref().unwrap_or("vectorless")
+                    j.activity_desc()
                 ),
                 Err(e) => {
                     eprintln!("error: {e}");
@@ -219,7 +219,7 @@ fn main() {
                     "loaded {} ({} lib(s)); activity = {}",
                     job.netlist,
                     job.libs.len(),
-                    job.vcd.as_deref().unwrap_or("vectorless")
+                    job.activity_desc()
                 );
             }
             match engine::analyze_job(&job) {

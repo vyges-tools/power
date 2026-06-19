@@ -1,14 +1,15 @@
 //! Engine: load a job → netlist + libs + activity → power report.
 //!
 //! Mirrors the other engines' shape: files in, a report (text or JSON) out, no
-//! subprocess. `vyges-char` supplies the Liberty; an optional VCD supplies real
-//! activity; the report's `activity_map()` is the seam out to `vyges-em-ir`.
+//! subprocess. `vyges-char` supplies the Liberty; an optional VCD or SAIF supplies
+//! real activity; the report's `activity_map()` is the seam out to `vyges-em-ir`.
 
 use crate::activity::Activity;
 use crate::job::PwrJob;
 use crate::liberty::Lib;
 use crate::netlist;
 use crate::power::{self, PowerReport};
+use crate::saif::Saif;
 use crate::spef::Spef;
 use crate::vcd::Vcd;
 
@@ -27,12 +28,14 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
 
     let vdd = job.vdd.unwrap_or(lib.voltage);
     let freq = job.freq_hz();
-    let act = match &job.vcd {
-        Some(v) => {
-            let vcd = Vcd::load(&job.resolve(v)).map_err(|e| e.to_string())?;
-            Activity::vectored(vcd, job.activity_factor, freq)
-        }
-        None => Activity::vectorless(job.activity_factor, freq),
+    let act = if let Some(s) = &job.saif {
+        let saif = Saif::load(&job.resolve(s)).map_err(|e| e.to_string())?;
+        Activity::vectored(saif, "vectored (SAIF)", job.activity_factor, freq)
+    } else if let Some(v) = &job.vcd {
+        let vcd = Vcd::load(&job.resolve(v)).map_err(|e| e.to_string())?;
+        Activity::vectored(vcd, "vectored (VCD)", job.activity_factor, freq)
+    } else {
+        Activity::vectorless(job.activity_factor, freq)
     };
     let wire_cap_f = job.default_wire_cap_pf * 1.0e-12;
     let spef = match &job.spef {

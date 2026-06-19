@@ -45,7 +45,8 @@ lib:              tiny.lib        # one or more (comma-separated; from vyges-cha
 clock:            clk 10.0        # port + period (ns) -> frequency
 vdd:              1.8             # supply (V); optional, else the lib's nominal
 vcd:              block.vcd       # vectored activity (omit -> vectorless)
-activity:         0.2             # vectorless toggle factor (and VCD fallback)
+# saif:           block.saif      # vectored activity from SAIF instead (exclusive with vcd)
+activity:         0.2             # vectorless toggle factor (and VCD/SAIF fallback)
 spef:             block.spef      # extracted wire caps from vyges-extract (optional)
 default_wire_cap: 0.001           # pF per net when no SPEF (crude stand-in)
 power_budget_mw:  1.0             # --fail-on-budget CI gate
@@ -71,17 +72,18 @@ vyges-power demo                                      # built-in design, no file
   `vyges-extract` SPEF (`*D_NET` total) when a `spef:` is given, else a flat stand-in.
   See `examples/counter/` — `counter.spef` is a real extract output
   (`vyges-extract run counter.ext`); two of its nets (`clk`, `n0`) carry extracted caps.
-- **Activity** — **vectored** (measured per-net toggle rates from a VCD) or
-  **vectorless** (a uniform `activity` factor × clock; also the fallback for nets
-  absent from the VCD — never silently zeroed).
+- **Activity** — **vectored** (measured per-net toggle rates from a **VCD** or a
+  **SAIF** — e.g. Verilator `--trace-saif`; `read_saif` turns `TC`/`DURATION` into a
+  toggle rate) or **vectorless** (a uniform `activity` factor × clock; also the
+  fallback for nets absent from the dump — never silently zeroed).
 - **The em-ir seam** — `emit_activity:` writes a per-instance **average current** +
   toggle rate map; `vyges-em-ir` lands that current on the nearest supply node instead
   of assuming worst-case-simultaneous switching.
 
 **Honest bounds (depth reserved).** v0's internal-energy model is a representative mean
 (real `internal_power` is per-arc / state- & path-dependent), vectorless is a uniform
-factor (not yet probabilistic propagation), and SAIF + glitch power are not yet in.
-These are the correlation/depth pass.
+factor (not yet probabilistic propagation), and glitch power is not yet in. These are
+the correlation/depth pass.
 
 ## Open core, certified fab plugins
 
@@ -91,8 +93,8 @@ adjustments ship as separate plugins under that foundry's terms, never in this r
 
 ## Current state (v0)
 
-Leakage + internal + net-switching power, per-instance and total; vectored (VCD) and
-vectorless activity; real extracted wire caps via a `vyges-extract` SPEF (`spef:`); the
+Leakage + internal + net-switching power, per-instance and total; vectored (VCD or SAIF)
+and vectorless activity; real extracted wire caps via a `vyges-extract` SPEF (`spef:`); the
 em-ir activity map; text + JSON; a `--fail-on-budget` CI gate. Pure std, unit + example
 tested offline, no subprocess.
 
@@ -103,4 +105,4 @@ tested offline, no subprocess.
 giving a realistic (lower) IR droop than the worst-case assumption.
 
 Depth reserved (next): per-arc / state-dependent internal energy, routed-block switching
-via extracted parasitics, probabilistic vectorless propagation, SAIF, glitch power.
+via extracted parasitics, probabilistic vectorless propagation, glitch power.

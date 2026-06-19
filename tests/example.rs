@@ -49,6 +49,32 @@ fn counter_uses_real_extracted_spef() {
 }
 
 #[test]
+fn saif_matches_vcd() {
+    // swap the vcd line for the equivalent SAIF -> identical vectored rates.
+    let text = std::fs::read_to_string("examples/block/block.pwr").unwrap();
+    let swapped: String = text
+        .lines()
+        .map(|l| if l.trim_start().starts_with("vcd:") { "saif: block.saif" } else { l })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let job = PwrJob::parse(&swapped, "examples/block").unwrap();
+    let rep = engine::analyze_job(&job).expect("analyze saif");
+
+    assert_eq!(rep.mode, "vectored (SAIF)");
+    // same toggle rates as block.vcd (TC over the 50 ns DURATION):
+    let rate = |inst: &str| rep.insts.iter().find(|i| i.inst == inst).unwrap().toggle_rate;
+    assert!((rate("u_nand") - 8.0e7).abs() < 1.0);
+    assert!((rate("u_inv") - 6.0e7).abs() < 1.0);
+    assert!((rate("u_ff") - 4.0e7).abs() < 1.0);
+}
+
+#[test]
+fn vcd_and_saif_are_mutually_exclusive() {
+    let both = "design: b\nnetlist: b.v\nlib: a.lib\nclock: clk 10.0\nvcd: b.vcd\nsaif: b.saif\n";
+    assert!(PwrJob::parse(both, "").is_err());
+}
+
+#[test]
 fn vectorless_when_no_vcd() {
     // strip the vcd line -> vectorless mode, still runs
     let text = std::fs::read_to_string("examples/block/block.pwr").unwrap();

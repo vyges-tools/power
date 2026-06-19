@@ -16,9 +16,9 @@
 //! v0 scope: total + per-instance **leakage** (from `cell_leakage_power`),
 //! **internal** switching energy (representative per-transition energy from the
 //! Liberty `internal_power` groups), and **net switching** power (½·C·V²·f·α).
-//! Activity comes from a **vectored** source (VCD toggle counts) or a
+//! Activity comes from a **vectored** source (VCD or SAIF toggle counts) or a
 //! **vectorless** default (a per-net activity factor × clock). Depth reserved
-//! for later: full SAIF, probabilistic vectorless propagation, glitch power, and
+//! for later: probabilistic vectorless propagation, glitch power, and
 //! state/path-dependent internal energy (`PowerError::NotModeled` hooks).
 
 pub mod job;
@@ -29,6 +29,7 @@ pub mod job;
 // resolving for the rest of the engine.
 pub use vyges_loom::{liberty, netlist, spef};
 pub mod vcd;
+pub mod saif;
 pub mod activity;
 pub mod power;
 pub mod engine;

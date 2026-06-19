@@ -1,0 +1,22 @@
+(SAIFILE
+  (SAIFVERSION "2.0")
+  (DIRECTION "backward")
+  (DESIGN block)
+  (DATE "Sun Jun 1 00:00:00 2026")
+  (VENDOR "Vyges")
+  (PROGRAM_NAME "vyges-power example")
+  (VERSION "1.0")
+  (DIVIDER / )
+  (TIMESCALE 1 ns)
+  (DURATION 50.0)
+  (INSTANCE block
+    (NET
+      (clk (T0 25.0) (T1 25.0) (TX 0.0) (TC 10) (IG 0))
+      (a   (T0 30.0) (T1 20.0) (TX 0.0) (TC 2)  (IG 0))
+      (b   (T0 30.0) (T1 20.0) (TX 0.0) (TC 2)  (IG 0))
+      (n1  (T0 25.0) (T1 25.0) (TX 0.0) (TC 4)  (IG 0))
+      (n2  (T0 25.0) (T1 25.0) (TX 0.0) (TC 3)  (IG 0))
+      (q   (T0 35.0) (T1 15.0) (TX 0.0) (TC 2)  (IG 0))
+    )
+  )
+)
