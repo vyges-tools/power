@@ -102,7 +102,8 @@ tested offline, no subprocess.
 [`correlation/`](correlation/)): leakage matches to ≈0.2 %, internal power within ~2×.
 **The loop is closed end-to-end** — `examples/counter/run_loop.sh` runs
 `vyges-extract` → `vyges-power` → `vyges-em-ir` and shows measured per-instance activity
-giving a realistic (lower) IR droop than the worst-case assumption.
+— from a VCD **or** a Verilator `--trace-saif` SAIF (`counter_tb.v`, regenerated when a
+simulator is on PATH) — giving a realistic (lower) IR droop than the worst-case assumption.
 
 Depth reserved (next): per-arc / state-dependent internal energy, routed-block switching
 via extracted parasitics, probabilistic vectorless propagation, glitch power.

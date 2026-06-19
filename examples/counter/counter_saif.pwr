@@ -1,0 +1,11 @@
+design:        counter
+netlist:       counter.v
+lib:           counter.lib
+clock:         clk 10.0        # 100 MHz
+vdd:           1.8
+spef:          counter.spef    # REAL extracted wire caps (vyges-extract run counter.ext)
+saif:          counter.saif    # REAL activity from Verilator --trace-saif (counter_tb.v)
+activity:      0.2             # vectorless fallback for nets absent from SAIF/SPEF
+emit_activity: counter_saif.activity
+# counter.saif was produced by:
+#   verilator --binary --trace-saif counter_tb.v counter.v cells_sim.v && ./obj_dir/Vcounter_tb

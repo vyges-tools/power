@@ -2,3 +2,4 @@
 *.rpt
 *.activity
 dist/
+obj_dir/
