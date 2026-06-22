@@ -1,6 +1,6 @@
 [package]
 name = "vyges-power"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 description = "Power analysis: per-instance leakage + dynamic power and the activity map that closes char -> power -> em-ir."
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ repository = "https://github.com/vyges-tools/power"
 # from the vyges-loom foundation — a sibling-checkout path dep in dev; release
 # pins a git/version dep.
 [dependencies]
-vyges-loom = { path = "../vyges-tools-loom" }
+vyges-loom = { git = "https://github.com/vyges-tools/loom", tag = "v0.1.0" }
 
 [[bin]]
 name = "vyges-power"

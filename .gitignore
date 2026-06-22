@@ -4,3 +4,4 @@
 *.flp
 dist/
 obj_dir/
+.cargo/config.toml
