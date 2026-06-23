@@ -85,6 +85,19 @@ vyges-power demo                                      # built-in design, no file
 factor (not yet probabilistic propagation), and glitch power is not yet in. These are
 the correlation/depth pass.
 
+## Domain coverage
+
+`vyges-power` operates on the **standard-cell digital abstraction** — it sums **per-cell
+Liberty leakage + internal switching energy × toggle activity** over a gate-level netlist. That
+makes it a **digital power sign-off** engine: it applies wherever a design reduces to
+characterized standard cells with a Liberty model and an activity source. It does **not** apply
+to analog / mixed-signal blocks — their power has no `cell_leakage_power` / `internal_power`
+Liberty-arc analogue, so there is nothing per-cell to sum. For analog / mixed-signal physical
+and integrity coverage, reach for the analog-capable Vyges engines —
+[`lvs`](https://github.com/vyges-tools/lvs), [`layout`](https://github.com/vyges-tools/layout),
+[`em-ir`](https://github.com/vyges-tools/em-ir), [`thermal`](https://github.com/vyges-tools/thermal),
+and [`extract`](https://github.com/vyges-tools/extract).
+
 ## Open core, certified fab plugins
 
 `vyges-power` is open (Apache-2.0) and contains **no foundry-confidential data** — power
