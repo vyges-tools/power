@@ -9,7 +9,7 @@ source = "git+https://github.com/vyges-tools/loom?branch=main#7f4aac6ffbeb6d01bc
 
 [[package]]
 name = "vyges-power"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "vyges-loom",
 ]
