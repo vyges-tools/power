@@ -169,7 +169,8 @@ fn main() {
       "out": { "type": "string", "description": "path to write the report to (default: stdout)" }
     }
   },
-  "artifacts": [ { "role": "power_report", "from_arg": "out" } ]
+  "artifacts": [ { "role": "power_report", "from_arg": "out" } ],
+  "consumes": ["netlist", "liberty", "vcd"]
 }
 "#;
         print!("{DESCRIBE}");
