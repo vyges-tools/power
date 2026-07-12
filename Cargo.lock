@@ -103,8 +103,8 @@ dependencies = [
 
 [[package]]
 name = "vyges-loom"
-version = "0.0.1"
-source = "git+https://github.com/vyges-tools/loom?branch=main#7f4aac6ffbeb6d01bcac7cf4e99d4f0afa28c844"
+version = "0.1.12"
+source = "git+https://github.com/vyges-tools/loom?branch=main#741ab598169af04996edcb1e4f3e397a19b802c4"
 
 [[package]]
 name = "vyges-power"

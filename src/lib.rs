@@ -22,15 +22,13 @@
 //! state/path-dependent internal energy (`PowerError::NotModeled` hooks).
 
 pub mod job;
-// liberty + netlist + spef now come from the shared vyges-loom foundation. loom's
-// Liberty is a superset: it carries the power view (leakage_w, int_energy_j, pin
-// cap_f, lib voltage, input_cap/outputs) alongside the timing view. Re-exported
-// under the crate root so `crate::liberty` / `crate::netlist` / `crate::spef` keep
-// resolving for the rest of the engine.
-pub use vyges_loom::{liberty, netlist, spef};
-pub mod names;
-pub mod vcd;
-pub mod saif;
+// liberty + netlist + spef + the activity readers (vcd/saif/names) all come from the
+// shared vyges-loom foundation — the parse-once/query-many readers live there, next to
+// each other, not in an engine. loom's Liberty is a superset (leakage_w, int_energy_j,
+// pin cap_f, lib voltage). Re-exported under the crate root so `crate::liberty` /
+// `crate::netlist` / `crate::spef` / `crate::vcd` / `crate::saif` / `crate::names` keep
+// resolving for the rest of the engine. The `fst` feature pulls loom's FST reader.
+pub use vyges_loom::{liberty, names, netlist, saif, spef, vcd};
 pub mod activity;
 pub mod power;
 pub mod engine;
