@@ -1,10 +1,11 @@
 //! Minimal VCD reader for **vectored** activity: per-signal transition counts over
 //! the dump window, so power can use measured toggle rates instead of an estimate.
 //!
-//! v0 scope: scalar signals (1-bit); a vector change counts as one transition.
-//! Signals are keyed by their **full hierarchical path** (`$scope`/`$upscope`), and a
-//! netlist net resolves to one of them by leaf + optional `scope:` — see [`crate::names`].
-//! Depth reserved: bit-level vector toggling, FST.
+//! Scalars and **vectors** are supported: a vector `$var` (`data [3:0]`) expands to
+//! per-bit nets (`data[3]…data[0]`) and each change counts the bits that actually flip
+//! (Hamming distance), so a bus's per-bit activity is measured, not lumped. Signals are
+//! keyed by their **full hierarchical path** (`$scope`/`$upscope`), and a netlist net
+//! resolves to one by leaf + optional `scope:` — see [`crate::names`]. Depth reserved: FST.
 
 use std::collections::HashMap;
 
@@ -90,8 +91,9 @@ impl Vcd {
         };
 
         let mut tick_s = 1.0e-9; // default 1ns
-        let mut sym2name: HashMap<String, String> = HashMap::new(); // sym -> full hierarchical path
-        let mut last: HashMap<String, char> = HashMap::new();
+        let mut sym2sig: HashMap<String, Sig> = HashMap::new(); // sym -> scalar path or per-bit paths
+        let mut last: HashMap<String, char> = HashMap::new(); // scalar full path -> last value
+        let mut vprev: HashMap<String, Vec<char>> = HashMap::new(); // sym -> last vector value (padded)
         let mut idx = NetIndex::default();
         let mut scope_stack: Vec<String> = Vec::new();
         let mut time_ticks: u64 = 0;
@@ -134,24 +136,28 @@ impl Vcd {
                 }
                 "$var" => {
                     // $var <type> <width> <sym> <name> [range] $end
-                    let _ty = toks.next();
-                    let _w = toks.next();
+                    let ty = toks.next().unwrap_or("").to_string();
+                    let width: usize = toks.next().and_then(|w| w.parse().ok()).unwrap_or(1);
                     let sym = toks.next().unwrap_or("").to_string();
                     let name = toks.next().unwrap_or("").to_string();
-                    // consume up to $end (drops any [msb:lsb])
+                    // remaining tokens before $end: a `[msb:lsb]` range may appear here
+                    let mut range: Option<String> = None;
                     for t in toks.by_ref() {
                         if t == "$end" {
                             break;
                         }
+                        if t.starts_with('[') {
+                            range = Some(t.to_string());
+                        }
                     }
                     if !sym.is_empty() && !name.is_empty() {
-                        let full = if scope_stack.is_empty() {
+                        let base = if scope_stack.is_empty() {
                             name
                         } else {
                             format!("{}.{}", scope_stack.join("."), name)
                         };
-                        idx.declare(&full);
-                        sym2name.insert(sym, full);
+                        let sig = build_sig(&ty, width, &base, range.as_deref(), &mut idx);
+                        sym2sig.insert(sym, sig);
                     }
                 }
                 _ => {
@@ -165,20 +171,39 @@ impl Vcd {
                             '0' | '1' | 'x' | 'X' | 'z' | 'Z' => {
                                 // scalar change: <value><sym>
                                 let sym = &tok[1..];
-                                if let Some(name) = sym2name.get(sym) {
+                                if let Some(Sig::Scalar(full)) = sym2sig.get(sym) {
                                     let v = first.to_ascii_lowercase();
-                                    let prev = last.insert(name.clone(), v);
+                                    let prev = last.insert(full.clone(), v);
                                     if count_now && prev.map(|p| p != v).unwrap_or(false) {
-                                        idx.add_toggles(name, 1);
+                                        idx.add_toggles(full, 1);
                                     }
                                 }
                             }
-                            'b' | 'B' | 'r' | 'R' => {
-                                // vector/real change: <value> <sym> (sym is the next token)
+                            'b' | 'B' => {
+                                // vector change: b<value> <sym> — count each *bit* that flips.
+                                let value = &tok[1..];
+                                if let Some(sym) = toks.next() {
+                                    if let Some(Sig::Vector { bits }) = sym2sig.get(sym) {
+                                        let cur = pad_bits(value, bits.len());
+                                        if count_now {
+                                            if let Some(prev) = vprev.get(sym) {
+                                                for (i, (a, b)) in cur.iter().zip(prev).enumerate() {
+                                                    if a != b {
+                                                        idx.add_toggles(&bits[i], 1);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        vprev.insert(sym.to_string(), cur);
+                                    }
+                                }
+                            }
+                            'r' | 'R' => {
+                                // real change: r<value> <sym> — not bit-decomposable; count 1.
                                 if let Some(sym) = toks.next() {
                                     if count_now {
-                                        if let Some(name) = sym2name.get(sym) {
-                                            idx.add_toggles(name, 1);
+                                        if let Some(Sig::Scalar(full)) = sym2sig.get(sym) {
+                                            idx.add_toggles(full, 1);
                                         }
                                     }
                                 }
@@ -213,6 +238,65 @@ fn parse_timescale(s: &str) -> f64 {
         }
     }
     1.0e-9
+}
+
+/// How a `$var` symbol maps to netlist nets: a single scalar net, or the per-bit
+/// nets of a vector (`data` with `[3:0]` → `data[3]…data[0]`, indexed left→right).
+enum Sig {
+    Scalar(String),
+    Vector { bits: Vec<String> },
+}
+
+/// Build a [`Sig`] for a `$var` and declare its net(s) in `idx`. Reals and 1-bit
+/// signals are scalars; wider signals expand to per-bit nets so a gate-level netlist's
+/// per-bit nets (`data[0]`) resolve and each bit's toggles are counted independently.
+fn build_sig(ty: &str, width: usize, base: &str, range: Option<&str>, idx: &mut NetIndex) -> Sig {
+    if ty.eq_ignore_ascii_case("real") || width <= 1 {
+        idx.declare(base);
+        return Sig::Scalar(base.to_string());
+    }
+    let (msb, lsb) = parse_range(range)
+        .filter(|(m, l)| (m - l).unsigned_abs() as usize + 1 == width)
+        .unwrap_or((width as i64 - 1, 0));
+    let step: i64 = if msb >= lsb { -1 } else { 1 }; // position 0 (leftmost bit) = msb
+    let mut bits = Vec::with_capacity(width);
+    let mut b = msb;
+    for _ in 0..width {
+        let full = format!("{base}[{b}]");
+        idx.declare(&full);
+        bits.push(full);
+        b += step;
+    }
+    Sig::Vector { bits }
+}
+
+/// Parse a `[msb:lsb]` (or single `[bit]`) range token into `(msb, lsb)`.
+fn parse_range(range: Option<&str>) -> Option<(i64, i64)> {
+    let inner = range?.trim_start_matches('[').trim_end_matches(']');
+    match inner.split_once(':') {
+        Some((m, l)) => Some((m.trim().parse().ok()?, l.trim().parse().ok()?)),
+        None => {
+            let b: i64 = inner.trim().parse().ok()?;
+            Some((b, b))
+        }
+    }
+}
+
+/// Left-extend a VCD vector value to `width` bits (VCD pads with `0`, or the leading
+/// `x`/`z`), returning it MSB-first as chars.
+fn pad_bits(value: &str, width: usize) -> Vec<char> {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() >= width {
+        return chars[chars.len() - width..].to_vec();
+    }
+    let fill = match chars.first() {
+        Some('x') | Some('X') => 'x',
+        Some('z') | Some('Z') => 'z',
+        _ => '0',
+    };
+    let mut out = vec![fill; width - chars.len()];
+    out.extend(chars);
+    out
 }
 
 #[cfg(test)]
@@ -321,5 +405,34 @@ $enddefinitions $end
         // scope: dut -> resolves to tb.dut.clk.
         let scoped = Vcd::parse(VCD_HIER).unwrap().with_scope(Some("dut".to_string()));
         assert!((scoped.toggle_rate("clk") - 1.0e8).abs() < 1.0); // 2 / 20ns
+    }
+
+    // A 4-bit vector `data[3:0]` exercised over 10 ns.
+    const VCD_VEC: &str = r#"
+$timescale 1ns $end
+$scope module top $end
+$var wire 4 ! data [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+b0000 !
+#5
+b0011 !
+#10
+b0101 !
+"#;
+
+    #[test]
+    fn vector_counts_per_bit_toggles() {
+        let v = Vcd::parse(VCD_VEC).unwrap();
+        // 0000 -> 0011 : data[1],data[0] flip.  0011 -> 0101 : data[2],data[1] flip.
+        assert_eq!(*v.idx.toggles.get("top.data[0]").unwrap(), 1);
+        assert_eq!(*v.idx.toggles.get("top.data[1]").unwrap(), 2);
+        assert_eq!(*v.idx.toggles.get("top.data[2]").unwrap(), 1);
+        assert_eq!(v.idx.toggles.get("top.data[3]").copied().unwrap_or(0), 0);
+        // per-bit net resolves; data[1] = 2 toggles / 10 ns
+        assert!((v.toggle_rate("data[1]") - 2.0e8).abs() < 1.0);
+        // the old behaviour (one toggle for the whole vector) is gone — bits are independent
+        assert_eq!(v.collisions(), 0);
     }
 }

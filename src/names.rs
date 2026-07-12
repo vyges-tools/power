@@ -63,6 +63,18 @@ impl NetIndex {
     pub fn collisions(&self) -> usize {
         self.by_leaf.values().filter(|paths| paths.len() > 1).count()
     }
+
+    /// Leaf names declared under more than one scope (the ambiguous ones), sorted.
+    pub fn colliding_leaves(&self) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .by_leaf
+            .iter()
+            .filter(|(_, paths)| paths.len() > 1)
+            .map(|(leaf, _)| leaf.clone())
+            .collect();
+        v.sort();
+        v
+    }
 }
 
 /// The last `.`-separated component of a hierarchical path.
