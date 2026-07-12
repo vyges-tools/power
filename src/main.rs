@@ -116,8 +116,63 @@ fn write_out(text: &str, cli: &Cli) {
     }
 }
 
+/// Emit the vyges-events causal trail for the power analysis — to stderr (the report
+/// goes to stdout / -o). code=POWER-* is the clustering key; objects are net refs used
+/// for cross-stage co-reference. Always emits the POWER-DONE summary; additionally emits
+/// one POWER-HOT warn per hotspot net (an instance dominating the design's total power).
+fn emit_power_events(rep: &PowerReport) {
+    use vyges_events::{Event, Severity};
+    let e = |sev, code: &str, msg: String, objs: Vec<String>| {
+        vyges_events::emit(&Event::new("vyges-power", sev, msg).with_code(code).with_objects(objs));
+    };
+
+    let total_w = rep.total_w();
+    // Hotspot nets: instances whose total power is a large share of the design total.
+    // Flag the top few so downstream (em-ir) can co-reference the offending nets.
+    if total_w > 0.0 {
+        let mut hot: Vec<&vyges_power::power::InstPower> = rep
+            .insts
+            .iter()
+            .filter(|i| !i.out_net.is_empty() && i.total_w() > 0.25 * total_w)
+            .collect();
+        hot.sort_by(|a, b| b.total_w().partial_cmp(&a.total_w()).unwrap_or(std::cmp::Ordering::Equal));
+        for i in hot {
+            e(
+                Severity::Warn,
+                "POWER-HOT",
+                format!(
+                    "hotspot net {} ({} / {}): {:.3} mW ({:.1}% of total), toggle {:.3e} Hz",
+                    i.out_net,
+                    i.inst,
+                    i.cell,
+                    i.total_w() * 1e3,
+                    100.0 * i.total_w() / total_w,
+                    i.toggle_rate
+                ),
+                vec![format!("net:{}", i.out_net)],
+            );
+        }
+    }
+
+    e(
+        Severity::Info,
+        "POWER-DONE",
+        format!(
+            "power analysis complete for {} ({} mode): total {:.3} mW = dynamic {:.3} mW + leakage {:.3} mW over {} instance(s)",
+            rep.design,
+            rep.mode,
+            total_w * 1e3,
+            rep.dynamic_w() * 1e3,
+            rep.leakage_w * 1e3,
+            rep.insts.len()
+        ),
+        vec![],
+    );
+}
+
 /// Emit the report; optionally write the em-ir activity map; honour the budget gate.
 fn emit(job: Option<&PwrJob>, rep: &PowerReport, cli: &Cli) -> ! {
+    emit_power_events(rep);
     let text = if cli.json { engine::report_json(rep) } else { engine::render_report(rep) };
     write_out(&text, cli);
 
