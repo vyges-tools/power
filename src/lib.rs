@@ -28,7 +28,7 @@ pub mod job;
 // pin cap_f, lib voltage). Re-exported under the crate root so `crate::liberty` /
 // `crate::netlist` / `crate::spef` / `crate::vcd` / `crate::saif` / `crate::names` keep
 // resolving for the rest of the engine. The `fst` feature pulls loom's FST reader.
-pub use vyges_loom::{liberty, names, netlist, saif, spef, vcd};
+pub use vyges_loom::{fst, liberty, names, netlist, saif, spef, vcd};
 pub mod activity;
 pub mod power;
 pub mod engine;

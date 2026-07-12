@@ -11,9 +11,10 @@
 //!   toggle-rate propagation through the netlist.)
 
 use crate::saif::Saif;
+use crate::fst::Fst;
 use crate::vcd::Vcd;
 
-/// A measured per-net toggle-rate source (VCD or SAIF).
+/// A measured per-net toggle-rate source (VCD, SAIF, or FST).
 pub trait ToggleSource {
     fn toggle_rate(&self, net: &str) -> f64;
 }
@@ -27,6 +28,12 @@ impl ToggleSource for Vcd {
 impl ToggleSource for Saif {
     fn toggle_rate(&self, net: &str) -> f64 {
         Saif::toggle_rate(self, net)
+    }
+}
+
+impl ToggleSource for Fst {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        Fst::toggle_rate(self, net)
     }
 }
 

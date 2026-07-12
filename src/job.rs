@@ -10,6 +10,7 @@
 //! vdd:           1.8                # supply voltage (V); optional, else from the lib
 //! vcd:           block.vcd          # optional: vectored activity (VCD toggle counts)
 //! saif:          block.saif         # optional: vectored activity (SAIF); exclusive with vcd
+//! fst:           block.fst          # optional: vectored activity (FST binary); exclusive with vcd/saif
 //! scope:         tb.dut             # optional: instance path where the design's nets live
 //! activity_window: 200ns 1200ns     # optional (VCD only): count toggles in [from,to) only
 //! activity:      0.2                # vectorless default toggle factor (used when no vcd/saif)
@@ -37,6 +38,7 @@ pub struct PwrJob {
     pub vdd: Option<f64>,             // supply (V); None -> take the lib's nominal
     pub vcd: Option<String>,          // vectored activity source (VCD)
     pub saif: Option<String>,         // vectored activity source (SAIF); exclusive with vcd
+    pub fst: Option<String>,          // vectored activity source (FST binary); exclusive with vcd/saif
     pub activity_window: Option<(f64, Option<f64>)>, // VCD-only: count [from, to) seconds; None=full dump
     pub scope: Option<String>,        // design instance path in the VCD/SAIF (disambiguates leaf names)
     pub spef: Option<String>,         // extracted wire parasitics (from vyges-extract)
@@ -53,6 +55,8 @@ impl PwrJob {
     pub fn activity_desc(&self) -> String {
         let base = if let Some(s) = &self.saif {
             format!("saif:{s}")
+        } else if let Some(f) = &self.fst {
+            format!("fst:{f}")
         } else if let Some(v) = &self.vcd {
             v.clone()
         } else {
@@ -128,8 +132,11 @@ impl PwrJob {
 
         let vcd = kv.get("vcd").filter(|s| !s.is_empty()).cloned();
         let saif = kv.get("saif").filter(|s| !s.is_empty()).cloned();
-        if vcd.is_some() && saif.is_some() {
-            return Err(JobError("specify only one vectored source: 'vcd' or 'saif'".into()));
+        let fst = kv.get("fst").filter(|s| !s.is_empty()).cloned();
+        if [&vcd, &saif, &fst].iter().filter(|s| s.is_some()).count() > 1 {
+            return Err(JobError(
+                "specify only one vectored source: 'vcd', 'saif', or 'fst'".into(),
+            ));
         }
 
         // activity_window: VCD-only steady-state window `from [to]`, each with a unit.
@@ -156,11 +163,11 @@ impl PwrJob {
                 Some(win)
             }
         };
-        // SAIF is cumulative (no per-transition timeline) and vectorless has nothing to
-        // window — the knob only means something for a VCD. Fail fast rather than no-op.
-        if activity_window.is_some() && vcd.is_none() {
+        // Windowing needs a per-transition timeline: VCD or FST (both have one). SAIF is
+        // cumulative and vectorless has nothing to window — fail fast rather than no-op.
+        if activity_window.is_some() && vcd.is_none() && fst.is_none() {
             return Err(JobError(
-                "activity_window requires a 'vcd:' source (SAIF is cumulative — re-dump a windowed sim instead)".into(),
+                "activity_window requires a 'vcd:' or 'fst:' source (SAIF is cumulative — re-dump a windowed sim instead)".into(),
             ));
         }
 
@@ -173,6 +180,7 @@ impl PwrJob {
             vdd: kv.get("vdd").and_then(|s| s.parse().ok()),
             vcd,
             saif,
+            fst,
             activity_window,
             scope: kv.get("scope").filter(|s| !s.is_empty()).cloned(),
             spef: kv.get("spef").filter(|s| !s.is_empty()).cloned(),
@@ -276,6 +284,17 @@ mod tests {
         let (f, t) = j.activity_window.unwrap();
         assert!((f - 1e-6).abs() < 1e-18);
         assert!(t.is_none());
+    }
+
+    #[test]
+    fn parses_fst_and_exclusivity() {
+        let j = PwrJob::parse(&format!("{WIN_BASE}fst: b.fst\n"), "").unwrap();
+        assert_eq!(j.fst.as_deref(), Some("b.fst"));
+        assert!(j.activity_desc().starts_with("fst:"));
+        // only one vectored source
+        assert!(PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nfst: b.fst\n"), "").is_err());
+        // activity_window is allowed with fst (FST has a per-transition timeline)
+        assert!(PwrJob::parse(&format!("{WIN_BASE}fst: b.fst\nactivity_window: 200ns\n"), "").is_ok());
     }
 
     #[test]

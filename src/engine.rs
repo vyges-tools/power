@@ -5,6 +5,7 @@
 //! real activity; the report's `activity_map()` is the seam out to `vyges-em-ir`.
 
 use crate::activity::Activity;
+use crate::fst::Fst;
 use crate::job::PwrJob;
 use crate::liberty::Lib;
 use crate::netlist;
@@ -68,6 +69,21 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         }
         warn_collisions(vcd.idx.colliding_leaves());
         Activity::vectored(vcd, "vectored (VCD)", job.activity_factor, freq)
+    } else if let Some(fp) = &job.fst {
+        let fst = Fst::load_scoped(&job.resolve(fp), job.activity_window, job.scope.clone())
+            .map_err(|e| e.to_string())?;
+        if job.activity_window.is_some() && fst.sim_time_s <= 0.0 {
+            vyges_events::emit(
+                &Event::new(
+                    "vyges-power",
+                    Severity::Warn,
+                    "activity_window is empty or outside the dump; nets fall back to the vectorless factor".to_string(),
+                )
+                .with_code("POWER-ACTIVITY-WINDOW-EMPTY"),
+            );
+        }
+        warn_collisions(fst.idx.colliding_leaves());
+        Activity::vectored(fst, "vectored (FST)", job.activity_factor, freq)
     } else {
         Activity::vectorless(job.activity_factor, freq)
     };

@@ -12,7 +12,9 @@ repository = "https://github.com/vyges-tools/power"
 # from the vyges-loom foundation — a sibling-checkout path dep in dev; release
 # pins a git/version dep.
 [dependencies]
-vyges-loom = { git = "https://github.com/vyges-tools/loom", branch = "main" }
+# `fst` pulls loom's FST binary-waveform reader (and, transitively, miniz_oxide for
+# zlib). Power is the one engine that consumes waveforms, so it opts in here.
+vyges-loom = { git = "https://github.com/vyges-tools/loom", branch = "main", features = ["fst"] }
 vyges-events = { git = "https://github.com/vyges-tools/events", branch = "main", default-features = false }
 
 [[bin]]
