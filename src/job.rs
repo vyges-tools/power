@@ -10,6 +10,7 @@
 //! vdd:           1.8                # supply voltage (V); optional, else from the lib
 //! vcd:           block.vcd          # optional: vectored activity (VCD toggle counts)
 //! saif:          block.saif         # optional: vectored activity (SAIF); exclusive with vcd
+//! activity_window: 200ns 1200ns     # optional (VCD only): count toggles in [from,to) only
 //! activity:      0.2                # vectorless default toggle factor (used when no vcd/saif)
 //! default_wire_cap: 0.0             # pF added to every net's switched cap (optional)
 //! power_budget_mw:  5.0             # optional CI gate (--fail-on-budget)
@@ -35,6 +36,7 @@ pub struct PwrJob {
     pub vdd: Option<f64>,             // supply (V); None -> take the lib's nominal
     pub vcd: Option<String>,          // vectored activity source (VCD)
     pub saif: Option<String>,         // vectored activity source (SAIF); exclusive with vcd
+    pub activity_window: Option<(f64, Option<f64>)>, // VCD-only: count [from, to) seconds; None=full dump
     pub spef: Option<String>,         // extracted wire parasitics (from vyges-extract)
     pub activity_factor: f64,         // vectorless default toggle factor (0..1), default 0.2
     pub default_wire_cap_pf: f64,     // pF added per net (crude wire-cap stand-in)
@@ -47,12 +49,17 @@ impl PwrJob {
     /// Human-readable activity source for status lines (`saif:…`, the VCD path, or
     /// `vectorless`).
     pub fn activity_desc(&self) -> String {
-        if let Some(s) = &self.saif {
+        let base = if let Some(s) = &self.saif {
             format!("saif:{s}")
         } else if let Some(v) = &self.vcd {
             v.clone()
         } else {
             "vectorless".to_string()
+        };
+        match self.activity_window {
+            Some((f, Some(t))) => format!("{base} [{:.3}ns,{:.3}ns)", f * 1e9, t * 1e9),
+            Some((f, None)) => format!("{base} [{:.3}ns,end)", f * 1e9),
+            None => base,
         }
     }
 
@@ -123,6 +130,38 @@ impl PwrJob {
             return Err(JobError("specify only one vectored source: 'vcd' or 'saif'".into()));
         }
 
+        // activity_window: VCD-only steady-state window `from [to]`, each with a unit.
+        let activity_window = match kv.get("activity_window").filter(|s| !s.is_empty()) {
+            None => None,
+            Some(s) => {
+                let toks: Vec<&str> = s.split_whitespace().collect();
+                let win = match toks.as_slice() {
+                    [f] => (parse_time(f)?, None),
+                    [f, t] => (parse_time(f)?, Some(parse_time(t)?)),
+                    _ => {
+                        return Err(JobError(
+                            "activity_window needs 'from [to]' with units, e.g. '200ns 1200ns'".into(),
+                        ))
+                    }
+                };
+                if let (from, Some(to)) = win {
+                    if to <= from {
+                        return Err(JobError(
+                            "activity_window 'to' must be greater than 'from'".into(),
+                        ));
+                    }
+                }
+                Some(win)
+            }
+        };
+        // SAIF is cumulative (no per-transition timeline) and vectorless has nothing to
+        // window — the knob only means something for a VCD. Fail fast rather than no-op.
+        if activity_window.is_some() && vcd.is_none() {
+            return Err(JobError(
+                "activity_window requires a 'vcd:' source (SAIF is cumulative — re-dump a windowed sim instead)".into(),
+            ));
+        }
+
         Ok(PwrJob {
             design: get("design")?,
             netlist: get("netlist")?,
@@ -132,6 +171,7 @@ impl PwrJob {
             vdd: kv.get("vdd").and_then(|s| s.parse().ok()),
             vcd,
             saif,
+            activity_window,
             spef: kv.get("spef").filter(|s| !s.is_empty()).cloned(),
             activity_factor: num("activity", 0.2)?,
             default_wire_cap_pf: num("default_wire_cap", 0.0)?,
@@ -168,6 +208,24 @@ fn strip_comment(line: &str) -> &str {
     }
 }
 
+/// Parse a time token `<number><unit>` (unit required: fs/ps/ns/us/ms/s) into seconds.
+/// A unit is mandatory so the value is unambiguous vs. the VCD's per-file `$timescale`.
+fn parse_time(tok: &str) -> Result<f64, JobError> {
+    let s = tok.trim().to_lowercase();
+    // Longer suffixes first so "ms"/"ns"/etc. win before the bare "s".
+    let units = [("fs", 1e-15), ("ps", 1e-12), ("ns", 1e-9), ("us", 1e-6), ("ms", 1e-3), ("s", 1.0)];
+    for (suf, scale) in units {
+        if let Some(num) = s.strip_suffix(suf) {
+            let n: f64 = num
+                .trim()
+                .parse()
+                .map_err(|_| JobError(format!("bad time value: {tok:?}")))?;
+            return Ok(n * scale);
+        }
+    }
+    Err(JobError(format!("time needs a unit (fs/ps/ns/us/ms/s): {tok:?}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +249,53 @@ mod tests {
     fn missing_clock_errors() {
         let r = PwrJob::parse("design: b\nnetlist: b.v\nlib: a.lib\n", "");
         assert!(r.is_err());
+    }
+
+    const WIN_BASE: &str = "design: b\nnetlist: b.v\nlib: a.lib\nclock: clk 10\n";
+
+    #[test]
+    fn parses_activity_window() {
+        let j = PwrJob::parse(
+            &format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200ns 1200ns\n"),
+            "",
+        )
+        .unwrap();
+        let (f, t) = j.activity_window.unwrap();
+        assert!((f - 200e-9).abs() < 1e-18);
+        assert!((t.unwrap() - 1200e-9).abs() < 1e-18);
+        assert!(j.activity_desc().contains("200.000ns"));
+    }
+
+    #[test]
+    fn open_ended_window() {
+        let j =
+            PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 1us\n"), "").unwrap();
+        let (f, t) = j.activity_window.unwrap();
+        assert!((f - 1e-6).abs() < 1e-18);
+        assert!(t.is_none());
+    }
+
+    #[test]
+    fn window_requires_vcd() {
+        // vectorless + window -> error
+        assert!(PwrJob::parse(&format!("{WIN_BASE}activity_window: 200ns\n"), "").is_err());
+        // saif + window -> error (SAIF is cumulative, cannot be windowed)
+        assert!(PwrJob::parse(
+            &format!("{WIN_BASE}saif: b.saif\nactivity_window: 200ns\n"),
+            ""
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn window_needs_unit_and_ordering() {
+        // bare number, no unit -> error
+        assert!(PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200\n"), "").is_err());
+        // to <= from -> error
+        assert!(PwrJob::parse(
+            &format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200ns 100ns\n"),
+            ""
+        )
+        .is_err());
     }
 }

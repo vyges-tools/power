@@ -32,7 +32,13 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         let saif = Saif::load(&job.resolve(s)).map_err(|e| e.to_string())?;
         Activity::vectored(saif, "vectored (SAIF)", job.activity_factor, freq)
     } else if let Some(v) = &job.vcd {
-        let vcd = Vcd::load(&job.resolve(v)).map_err(|e| e.to_string())?;
+        let vcd = Vcd::load_windowed(&job.resolve(v), job.activity_window)
+            .map_err(|e| e.to_string())?;
+        if job.activity_window.is_some() && vcd.sim_time_s <= 0.0 {
+            eprintln!(
+                "warning: activity_window is empty or outside the dump; nets fall back to the vectorless factor"
+            );
+        }
         Activity::vectored(vcd, "vectored (VCD)", job.activity_factor, freq)
     } else {
         Activity::vectorless(job.activity_factor, freq)
