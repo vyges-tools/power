@@ -28,6 +28,7 @@ pub mod job;
 // under the crate root so `crate::liberty` / `crate::netlist` / `crate::spef` keep
 // resolving for the rest of the engine.
 pub use vyges_loom::{liberty, netlist, spef};
+pub mod names;
 pub mod vcd;
 pub mod saif;
 pub mod activity;

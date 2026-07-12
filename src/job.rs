@@ -10,6 +10,7 @@
 //! vdd:           1.8                # supply voltage (V); optional, else from the lib
 //! vcd:           block.vcd          # optional: vectored activity (VCD toggle counts)
 //! saif:          block.saif         # optional: vectored activity (SAIF); exclusive with vcd
+//! scope:         tb.dut             # optional: instance path where the design's nets live
 //! activity_window: 200ns 1200ns     # optional (VCD only): count toggles in [from,to) only
 //! activity:      0.2                # vectorless default toggle factor (used when no vcd/saif)
 //! default_wire_cap: 0.0             # pF added to every net's switched cap (optional)
@@ -37,6 +38,7 @@ pub struct PwrJob {
     pub vcd: Option<String>,          // vectored activity source (VCD)
     pub saif: Option<String>,         // vectored activity source (SAIF); exclusive with vcd
     pub activity_window: Option<(f64, Option<f64>)>, // VCD-only: count [from, to) seconds; None=full dump
+    pub scope: Option<String>,        // design instance path in the VCD/SAIF (disambiguates leaf names)
     pub spef: Option<String>,         // extracted wire parasitics (from vyges-extract)
     pub activity_factor: f64,         // vectorless default toggle factor (0..1), default 0.2
     pub default_wire_cap_pf: f64,     // pF added per net (crude wire-cap stand-in)
@@ -172,6 +174,7 @@ impl PwrJob {
             vcd,
             saif,
             activity_window,
+            scope: kv.get("scope").filter(|s| !s.is_empty()).cloned(),
             spef: kv.get("spef").filter(|s| !s.is_empty()).cloned(),
             activity_factor: num("activity", 0.2)?,
             default_wire_cap_pf: num("default_wire_cap", 0.0)?,

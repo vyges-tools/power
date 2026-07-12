@@ -28,17 +28,28 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
 
     let vdd = job.vdd.unwrap_or(lib.voltage);
     let freq = job.freq_hz();
+    // Warn once when leaf names collide across scopes and no `scope:` disambiguates them
+    // — those nets resolve to nothing and fall back to the vectorless factor.
+    let warn_collisions = |n: usize| {
+        if n > 0 && job.scope.is_none() {
+            eprintln!(
+                "warning: {n} net name(s) appear in multiple scopes; set 'scope:' to disambiguate (ambiguous nets fall back to the vectorless factor)"
+            );
+        }
+    };
     let act = if let Some(s) = &job.saif {
-        let saif = Saif::load(&job.resolve(s)).map_err(|e| e.to_string())?;
+        let saif = Saif::load_scoped(&job.resolve(s), job.scope.clone()).map_err(|e| e.to_string())?;
+        warn_collisions(saif.collisions());
         Activity::vectored(saif, "vectored (SAIF)", job.activity_factor, freq)
     } else if let Some(v) = &job.vcd {
-        let vcd = Vcd::load_windowed(&job.resolve(v), job.activity_window)
+        let vcd = Vcd::load_scoped(&job.resolve(v), job.activity_window, job.scope.clone())
             .map_err(|e| e.to_string())?;
         if job.activity_window.is_some() && vcd.sim_time_s <= 0.0 {
             eprintln!(
                 "warning: activity_window is empty or outside the dump; nets fall back to the vectorless factor"
             );
         }
+        warn_collisions(vcd.collisions());
         Activity::vectored(vcd, "vectored (VCD)", job.activity_factor, freq)
     } else {
         Activity::vectorless(job.activity_factor, freq)
