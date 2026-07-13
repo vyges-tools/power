@@ -20,7 +20,16 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
 
     let mut lib: Option<Lib> = None;
     for l in &job.libs {
-        let parsed = Lib::load(&job.resolve(l)).map_err(|e| e.to_string())?;
+        // NLDM-only load (skip CCS) — and this is the *correct* model for power, not
+        // just faster: switching energy is ½·C·V² where C is the physical charge on the
+        // net = static input cap (cap_f) + wire cap. CCS `receiver_capacitance` is the
+        // Miller-inflated *delay-effective* input load — using it here would over-count
+        // energy — and `output_current` is a driver-delay/SI model, not a power input.
+        // Dynamic energy comes from Liberty `internal_power` (int_energy_j). So CCS is
+        // dropped at parse time for a smaller/faster load with a result that is correct
+        // by design. (Revisit only if power adopts a genuinely CCS-based energy model.)
+        let parsed = Lib::load_opts(&job.resolve(l), crate::liberty::LibOpts { skip_ccs: true })
+            .map_err(|e| e.to_string())?;
         match &mut lib {
             Some(acc) => acc.merge(parsed),
             None => lib = Some(parsed),
