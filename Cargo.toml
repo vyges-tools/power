@@ -1,6 +1,6 @@
 [package]
 name = "vyges-power"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "Power analysis: per-instance leakage + dynamic power and the activity map that closes char -> power -> em-ir."
 license = "Apache-2.0"
