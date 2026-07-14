@@ -85,6 +85,25 @@ vyges-power demo                                      # built-in design, no file
 factor (not yet probabilistic propagation), and glitch power is not yet in. These are
 the correlation/depth pass.
 
+### Activity accuracy: SAIF vs VCD, glitch, and X
+
+Active power is only as accurate as the switching activity behind it, so a few rules matter:
+
+- **SAIF for average power, ordered VCD for peak.** A SAIF carries per-net toggle
+  *statistics* — the reliable input for **average** power. A VCD additionally carries event
+  timing/order, which is needed only for **peak/instantaneous** power (attributing a
+  switching output to the input that caused it). Both are supported. The VCD reader
+  **bit-blasts buses** and counts every per-bit transition — including multiple transitions
+  of the same bus within a single timestep — so toggles are neither dropped nor lumped.
+- **Glitch power (~5% of active) is a delay-annotated effect, not modeled here.** Glitch
+  power is the difference between a full-delay and a zero-delay simulation. Activity here
+  comes from a **zero-delay** simulator (no SDF back-annotation), so this engine reports the
+  **non-glitch** active power — the ~95%. The glitch tail needs a delay-annotated sim plus a
+  physical-glitch filter (a pulse narrower than ~1.5× an inverter delay does not propagate);
+  it is out of scope for v0.
+- **Initialize X before the activity dump.** Uninitialized (X) state corrupts toggle counts
+  and causes RTL-vs-gate mismatches — drive activity from a reset/X-initialized run.
+
 ## Domain coverage
 
 `vyges-power` operates on the **standard-cell digital abstraction** — it sums **per-cell
