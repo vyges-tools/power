@@ -62,6 +62,14 @@ vyges-power demo                                      # built-in design, no file
 # common flags: -o FILE · --json · -q/--quiet · -v/--verbose · -h/--help · -V/--version
 ```
 
+### Vectored gate-level power from a simulation
+
+The `vcd:` (or `saif:`) source is meant to be a **gate-level** activity dump: run a
+zero-delay gate-level simulation of the synthesized netlist under your testbench, dump the
+VCD, and point the job at it (set `scope:` to the DUT instance path inside the dump so gate
+net names resolve). Zero-delay activity ⇒ **non-glitch** active power; glitch power needs a
+delay-annotated flow (not modeled — see *Honest bounds*).
+
 ## What it computes (v0)
 
 - **Leakage** — per cell from `cell_leakage_power`.
