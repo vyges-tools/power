@@ -228,6 +228,10 @@ fn main() {
         const DESCRIBE: &str = r#"{
   "name": "power",
   "summary": "gate-level power analysis (leakage + dynamic) with a CI gate",
+  "maturity": "workflow-validated",
+  "provenance_limitations": [
+      "The job names the netlist, Liberty and any VCD/SAIF activity; input_hash covers the job path and arguments, not their contents."
+  ],
   "invocation": {
     "args_template": ["run", "{job}"],
     "optional": [ { "arg": "out", "flag": "-o" } ],
