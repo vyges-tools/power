@@ -65,10 +65,16 @@ impl PowerReport {
     pub fn activity_map(&self) -> String {
         let mut s = String::new();
         s.push_str("# vyges-power activity map for vyges-em-ir\n");
-        s.push_str(&format!("# design {}  vdd {:.4} V  mode {}\n", self.design, self.vdd, self.mode));
+        s.push_str(&format!(
+            "# design {}  vdd {:.4} V  mode {}\n",
+            self.design, self.vdd, self.mode
+        ));
         s.push_str("# columns: instance  avg_current_a  toggle_rate_hz\n");
         for i in &self.insts {
-            s.push_str(&format!("{}  {:.6e}  {:.6e}\n", i.inst, i.avg_current_a, i.toggle_rate));
+            s.push_str(&format!(
+                "{}  {:.6e}  {:.6e}\n",
+                i.inst, i.avg_current_a, i.toggle_rate
+            ));
         }
         s
     }
@@ -116,7 +122,11 @@ pub fn analyze(
             .map(|(_, n)| n.clone())
             .unwrap_or_default();
 
-        let tr = if out_net.is_empty() { 0.0 } else { act.rate(&out_net) };
+        let tr = if out_net.is_empty() {
+            0.0
+        } else {
+            act.rate(&out_net)
+        };
         let leakage_w = cell.leakage_w;
         let internal_w = cell.int_energy_j * tr;
         let pin_load = net_load.get(&out_net).copied().unwrap_or(0.0);

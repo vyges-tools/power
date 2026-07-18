@@ -35,15 +35,15 @@ pub struct PwrJob {
     pub libs: Vec<String>,
     pub clock_port: String,
     pub period_ns: f64,
-    pub vdd: Option<f64>,             // supply (V); None -> take the lib's nominal
-    pub vcd: Option<String>,          // vectored activity source (VCD)
-    pub saif: Option<String>,         // vectored activity source (SAIF); exclusive with vcd
-    pub fst: Option<String>,          // vectored activity source (FST binary); exclusive with vcd/saif
+    pub vdd: Option<f64>,     // supply (V); None -> take the lib's nominal
+    pub vcd: Option<String>,  // vectored activity source (VCD)
+    pub saif: Option<String>, // vectored activity source (SAIF); exclusive with vcd
+    pub fst: Option<String>,  // vectored activity source (FST binary); exclusive with vcd/saif
     pub activity_window: Option<(f64, Option<f64>)>, // VCD-only: count [from, to) seconds; None=full dump
-    pub scope: Option<String>,        // design instance path in the VCD/SAIF (disambiguates leaf names)
-    pub spef: Option<String>,         // extracted wire parasitics (from vyges-extract)
-    pub activity_factor: f64,         // vectorless default toggle factor (0..1), default 0.2
-    pub default_wire_cap_pf: f64,     // pF added per net (crude wire-cap stand-in)
+    pub scope: Option<String>, // design instance path in the VCD/SAIF (disambiguates leaf names)
+    pub spef: Option<String>,  // extracted wire parasitics (from vyges-extract)
+    pub activity_factor: f64,  // vectorless default toggle factor (0..1), default 0.2
+    pub default_wire_cap_pf: f64, // pF added per net (crude wire-cap stand-in)
     pub power_budget_mw: Option<f64>, // CI gate with --fail-on-budget
     pub emit_activity: Option<String>,
     pub base_dir: String,
@@ -84,7 +84,10 @@ impl PwrJob {
         if p.is_absolute() || self.base_dir.is_empty() {
             rel.to_string()
         } else {
-            Path::new(&self.base_dir).join(rel).to_string_lossy().into_owned()
+            Path::new(&self.base_dir)
+                .join(rel)
+                .to_string_lossy()
+                .into_owned()
         }
     }
 
@@ -106,17 +109,24 @@ impl PwrJob {
                 let [port, per] = toks.as_slice() else {
                     return Err(JobError("clock needs 'port period_ns'".into()));
                 };
-                let period: f64 =
-                    per.parse().map_err(|_| JobError(format!("bad clock period: {per:?}")))?;
+                let period: f64 = per
+                    .parse()
+                    .map_err(|_| JobError(format!("bad clock period: {per:?}")))?;
                 clock = Some((port.to_string(), period));
                 continue;
             }
             kv.insert(key, val);
         }
-        let get = |k: &str| kv.get(k).cloned().ok_or_else(|| JobError(format!("missing key: {k}")));
+        let get = |k: &str| {
+            kv.get(k)
+                .cloned()
+                .ok_or_else(|| JobError(format!("missing key: {k}")))
+        };
         let num = |k: &str, dflt: f64| -> Result<f64, JobError> {
             match kv.get(k) {
-                Some(s) => s.parse().map_err(|_| JobError(format!("bad number for {k}: {s:?}"))),
+                Some(s) => s
+                    .parse()
+                    .map_err(|_| JobError(format!("bad number for {k}: {s:?}"))),
                 None => Ok(dflt),
             }
         };
@@ -149,7 +159,8 @@ impl PwrJob {
                     [f, t] => (parse_time(f)?, Some(parse_time(t)?)),
                     _ => {
                         return Err(JobError(
-                            "activity_window needs 'from [to]' with units, e.g. '200ns 1200ns'".into(),
+                            "activity_window needs 'from [to]' with units, e.g. '200ns 1200ns'"
+                                .into(),
                         ))
                     }
                 };
@@ -193,8 +204,7 @@ impl PwrJob {
     }
 
     pub fn load(path: &str) -> Result<PwrJob, JobError> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| JobError(format!("{path}: {e}")))?;
+        let text = std::fs::read_to_string(path).map_err(|e| JobError(format!("{path}: {e}")))?;
         let base_dir = Path::new(path)
             .parent()
             .map(|p| p.to_string_lossy().into_owned())
@@ -224,7 +234,14 @@ fn strip_comment(line: &str) -> &str {
 fn parse_time(tok: &str) -> Result<f64, JobError> {
     let s = tok.trim().to_lowercase();
     // Longer suffixes first so "ms"/"ns"/etc. win before the bare "s".
-    let units = [("fs", 1e-15), ("ps", 1e-12), ("ns", 1e-9), ("us", 1e-6), ("ms", 1e-3), ("s", 1.0)];
+    let units = [
+        ("fs", 1e-15),
+        ("ps", 1e-12),
+        ("ns", 1e-9),
+        ("us", 1e-6),
+        ("ms", 1e-3),
+        ("s", 1.0),
+    ];
     for (suf, scale) in units {
         if let Some(num) = s.strip_suffix(suf) {
             let n: f64 = num
@@ -234,7 +251,9 @@ fn parse_time(tok: &str) -> Result<f64, JobError> {
             return Ok(n * scale);
         }
     }
-    Err(JobError(format!("time needs a unit (fs/ps/ns/us/ms/s): {tok:?}")))
+    Err(JobError(format!(
+        "time needs a unit (fs/ps/ns/us/ms/s): {tok:?}"
+    )))
 }
 
 #[cfg(test)]
@@ -294,7 +313,11 @@ mod tests {
         // only one vectored source
         assert!(PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nfst: b.fst\n"), "").is_err());
         // activity_window is allowed with fst (FST has a per-transition timeline)
-        assert!(PwrJob::parse(&format!("{WIN_BASE}fst: b.fst\nactivity_window: 200ns\n"), "").is_ok());
+        assert!(PwrJob::parse(
+            &format!("{WIN_BASE}fst: b.fst\nactivity_window: 200ns\n"),
+            ""
+        )
+        .is_ok());
     }
 
     #[test]
@@ -312,7 +335,9 @@ mod tests {
     #[test]
     fn window_needs_unit_and_ordering() {
         // bare number, no unit -> error
-        assert!(PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200\n"), "").is_err());
+        assert!(
+            PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200\n"), "").is_err()
+        );
         // to <= from -> error
         assert!(PwrJob::parse(
             &format!("{WIN_BASE}vcd: b.vcd\nactivity_window: 200ns 100ns\n"),

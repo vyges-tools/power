@@ -10,8 +10,8 @@
 //!   simulation exists. (Depth reserved: probabilistic signal-probability /
 //!   toggle-rate propagation through the netlist.)
 
-use crate::saif::Saif;
 use crate::fst::Fst;
+use crate::saif::Saif;
 use crate::vcd::Vcd;
 
 /// A measured per-net toggle-rate source (VCD, SAIF, or FST).
@@ -38,13 +38,21 @@ impl ToggleSource for Fst {
 }
 
 pub enum Activity {
-    Vectored { src: Box<dyn ToggleSource>, fallback_rate: f64, label: &'static str },
-    Vectorless { rate: f64 },
+    Vectored {
+        src: Box<dyn ToggleSource>,
+        fallback_rate: f64,
+        label: &'static str,
+    },
+    Vectorless {
+        rate: f64,
+    },
 }
 
 impl Activity {
     pub fn vectorless(activity_factor: f64, freq_hz: f64) -> Self {
-        Activity::Vectorless { rate: activity_factor * freq_hz }
+        Activity::Vectorless {
+            rate: activity_factor * freq_hz,
+        }
     }
 
     /// Vectored activity from any toggle source; `label` names the source in reports.
@@ -65,7 +73,9 @@ impl Activity {
     pub fn rate(&self, net: &str) -> f64 {
         match self {
             Activity::Vectorless { rate } => *rate,
-            Activity::Vectored { src, fallback_rate, .. } => {
+            Activity::Vectored {
+                src, fallback_rate, ..
+            } => {
                 let r = src.toggle_rate(net);
                 if r > 0.0 {
                     r

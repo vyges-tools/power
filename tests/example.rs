@@ -18,7 +18,13 @@ fn example_block_runs_end_to_end() {
 
     // toggle rates come straight from block.vcd (50 ns window):
     //   n1 (u_nand): 4 transitions -> 8e7 ; n2 (u_inv): 3 -> 6e7 ; q (u_ff): 2 -> 4e7
-    let rate = |inst: &str| rep.insts.iter().find(|i| i.inst == inst).unwrap().toggle_rate;
+    let rate = |inst: &str| {
+        rep.insts
+            .iter()
+            .find(|i| i.inst == inst)
+            .unwrap()
+            .toggle_rate
+    };
     assert!((rate("u_nand") - 8.0e7).abs() < 1.0);
     assert!((rate("u_inv") - 6.0e7).abs() < 1.0);
     assert!((rate("u_ff") - 4.0e7).abs() < 1.0);
@@ -42,9 +48,11 @@ fn counter_uses_real_extracted_spef() {
     assert_eq!(rep.insts.len(), 5);
     assert!(rep.unmatched.is_empty());
     // clkbuf drives the high-toggle clk net -> it should be the top consumer
-    let top = rep.insts.iter().max_by(|a, b| {
-        a.total_w().partial_cmp(&b.total_w()).unwrap()
-    }).unwrap();
+    let top = rep
+        .insts
+        .iter()
+        .max_by(|a, b| a.total_w().partial_cmp(&b.total_w()).unwrap())
+        .unwrap();
     assert_eq!(top.inst, "clkbuf");
 }
 
@@ -54,7 +62,13 @@ fn saif_matches_vcd() {
     let text = std::fs::read_to_string("examples/block/block.pwr").unwrap();
     let swapped: String = text
         .lines()
-        .map(|l| if l.trim_start().starts_with("vcd:") { "saif: block.saif" } else { l })
+        .map(|l| {
+            if l.trim_start().starts_with("vcd:") {
+                "saif: block.saif"
+            } else {
+                l
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let job = PwrJob::parse(&swapped, "examples/block").unwrap();
@@ -62,7 +76,13 @@ fn saif_matches_vcd() {
 
     assert_eq!(rep.mode, "vectored (SAIF)");
     // same toggle rates as block.vcd (TC over the 50 ns DURATION):
-    let rate = |inst: &str| rep.insts.iter().find(|i| i.inst == inst).unwrap().toggle_rate;
+    let rate = |inst: &str| {
+        rep.insts
+            .iter()
+            .find(|i| i.inst == inst)
+            .unwrap()
+            .toggle_rate
+    };
     assert!((rate("u_nand") - 8.0e7).abs() < 1.0);
     assert!((rate("u_inv") - 6.0e7).abs() < 1.0);
     assert!((rate("u_ff") - 4.0e7).abs() < 1.0);
@@ -78,7 +98,11 @@ fn vcd_and_saif_are_mutually_exclusive() {
 fn vectorless_when_no_vcd() {
     // strip the vcd line -> vectorless mode, still runs
     let text = std::fs::read_to_string("examples/block/block.pwr").unwrap();
-    let stripped: String = text.lines().filter(|l| !l.trim_start().starts_with("vcd:")).collect::<Vec<_>>().join("\n");
+    let stripped: String = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("vcd:"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let job = PwrJob::parse(&stripped, "examples/block").unwrap();
     let rep = engine::analyze_job(&job).expect("analyze vectorless");
     assert_eq!(rep.mode, "vectorless");

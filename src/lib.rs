@@ -30,8 +30,8 @@ pub mod job;
 // resolving for the rest of the engine. The `fst` feature pulls loom's FST reader.
 pub use vyges_loom::{fst, liberty, names, netlist, saif, spef, vcd};
 pub mod activity;
-pub mod power;
 pub mod engine;
+pub mod power;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COPYRIGHT: &str = "© 2026 Vyges. All Rights Reserved.  https://vyges.com";

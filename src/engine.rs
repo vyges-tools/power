@@ -60,7 +60,8 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         }
     };
     let act = if let Some(s) = &job.saif {
-        let saif = Saif::load_scoped(&job.resolve(s), job.scope.clone()).map_err(|e| e.to_string())?;
+        let saif =
+            Saif::load_scoped(&job.resolve(s), job.scope.clone()).map_err(|e| e.to_string())?;
         warn_collisions(saif.idx.colliding_leaves());
         Activity::vectored(saif, "vectored (SAIF)", job.activity_factor, freq)
     } else if let Some(v) = &job.vcd {
@@ -101,7 +102,14 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         Some(p) => Some(Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?),
         None => None,
     };
-    Ok(power::analyze(&nl, &lib, &act, vdd, wire_cap_f, spef.as_ref()))
+    Ok(power::analyze(
+        &nl,
+        &lib,
+        &act,
+        vdd,
+        wire_cap_f,
+        spef.as_ref(),
+    ))
 }
 
 /// A tiny built-in design (no files needed) — `vyges-power demo`.
@@ -141,7 +149,11 @@ pub fn render_report(rep: &PowerReport) -> String {
     s.push_str(&format!("  avg current      {}\n\n", fmt_a(i_total)));
 
     let mut top = rep.insts.clone();
-    top.sort_by(|a, b| b.total_w().partial_cmp(&a.total_w()).unwrap_or(std::cmp::Ordering::Equal));
+    top.sort_by(|a, b| {
+        b.total_w()
+            .partial_cmp(&a.total_w())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     s.push_str("  top instances by power:\n");
     s.push_str("    instance              cell             total      leak      dyn       I_avg\n");
     for i in top.iter().take(10) {
@@ -181,7 +193,10 @@ pub fn report_json(rep: &PowerReport) -> String {
     s.push_str(&format!("  \"dynamic_w\": {:.6e},\n", rep.dynamic_w()));
     s.push_str(&format!("  \"total_w\": {:.6e},\n", rep.total_w()));
     s.push_str(&format!("  \"total_current_a\": {:.6e},\n", i_total));
-    s.push_str(&format!("  \"unmatched_cells\": [{}],\n", jlist(&rep.unmatched)));
+    s.push_str(&format!(
+        "  \"unmatched_cells\": [{}],\n",
+        jlist(&rep.unmatched)
+    ));
     s.push_str("  \"by_instance\": [\n");
     for (k, i) in rep.insts.iter().enumerate() {
         let comma = if k + 1 < rep.insts.len() { "," } else { "" };

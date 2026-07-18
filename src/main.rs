@@ -52,7 +52,11 @@ fn link(label: &str, url: &str) {
     use std::io::IsTerminal;
     println!("{label}:\n  {url}");
     if std::io::stdout().is_terminal() {
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
         let _ = std::process::Command::new(opener).arg(url).status();
     }
 }
@@ -123,7 +127,11 @@ fn write_out(text: &str, cli: &Cli) {
 fn emit_power_events(rep: &PowerReport) {
     use vyges_events::{Event, Severity};
     let e = |sev, code: &str, msg: String, objs: Vec<String>| {
-        vyges_events::emit(&Event::new("vyges-power", sev, msg).with_code(code).with_objects(objs));
+        vyges_events::emit(
+            &Event::new("vyges-power", sev, msg)
+                .with_code(code)
+                .with_objects(objs),
+        );
     };
 
     let total_w = rep.total_w();
@@ -135,7 +143,11 @@ fn emit_power_events(rep: &PowerReport) {
             .iter()
             .filter(|i| !i.out_net.is_empty() && i.total_w() > 0.25 * total_w)
             .collect();
-        hot.sort_by(|a, b| b.total_w().partial_cmp(&a.total_w()).unwrap_or(std::cmp::Ordering::Equal));
+        hot.sort_by(|a, b| {
+            b.total_w()
+                .partial_cmp(&a.total_w())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         for i in hot {
             e(
                 Severity::Warn,
@@ -173,7 +185,11 @@ fn emit_power_events(rep: &PowerReport) {
 /// Emit the report; optionally write the em-ir activity map; honour the budget gate.
 fn emit(job: Option<&PwrJob>, rep: &PowerReport, cli: &Cli) -> ! {
     emit_power_events(rep);
-    let text = if cli.json { engine::report_json(rep) } else { engine::render_report(rep) };
+    let text = if cli.json {
+        engine::report_json(rep)
+    } else {
+        engine::render_report(rep)
+    };
     write_out(&text, cli);
 
     if let Some(job) = job {
@@ -226,6 +242,10 @@ fn main() {
     }
   },
   "artifacts": [ { "role": "power_report", "from_arg": "out" } ],
+  "assertion": {
+    "id": "power-analysis",
+    "not_applicable": true
+  },
   "consumes": ["netlist", "liberty", "vcd"]
 }
 "#;
@@ -247,7 +267,11 @@ fn main() {
         return link("Star vyges-power on GitHub ⭐", STAR_URL);
     }
     if cli.version {
-        println!("vyges-power {} ({})", vyges_power::VERSION, env!("VYGES_GIT_SHA"));
+        println!(
+            "vyges-power {} ({})",
+            vyges_power::VERSION,
+            env!("VYGES_GIT_SHA")
+        );
         println!("{}", vyges_power::COPYRIGHT);
         return;
     }
