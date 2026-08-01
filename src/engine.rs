@@ -102,6 +102,7 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         Some(p) => Some(Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?),
         None => None,
     };
+    emit_input_coverage(&nl, &lib, &act, spef.as_ref());
     Ok(power::analyze(
         &nl,
         &lib,
@@ -110,6 +111,105 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         wire_cap_f,
         spef.as_ref(),
     ))
+}
+
+/// Report how much of the design each input actually covers.
+///
+/// The counting is `vyges_loom::coverage`, shared with the other engines so it cannot drift.
+/// The verdicts are here, because they are not portable: what matters to a power run is not what
+/// matters to a timing run.
+///
+/// The activity one is the reason this exists. In vectored mode a net the dump does not name
+/// silently takes the vectorless fallback, so a dump covering a fraction of the design still
+/// produces a report labelled "vectored (VCD)" whose numbers are mostly the uniform estimate.
+/// Power figures get quoted, and nothing said so.
+fn emit_input_coverage(
+    nl: &netlist::Netlist,
+    lib: &Lib,
+    act: &Activity,
+    spef: Option<&Spef>,
+) {
+    use std::collections::BTreeSet;
+    use vyges_events::{Event, Severity};
+    use vyges_loom::coverage;
+
+    let emit = |attention: bool, code: &str, msg: String| {
+        let sev = if attention { Severity::Warn } else { Severity::Info };
+        vyges_events::emit(&Event::new("vyges-power", sev, msg).with_code(code));
+    };
+
+    let nc = coverage::netlist(nl, lib);
+    // Unlike a timer, a power run does not error on an unknown master — it simply contributes
+    // nothing, so an unresolved signal cell is missing power rather than a missing check.
+    emit(
+        nc.unresolved_signal > 0 || nc.instances == 0,
+        "POWER-NETLIST",
+        format!(
+            "netlist: {} instance(s) of {} master(s); {} with a library cell, {} physical-only, \
+             {} with signal pins have NO library cell (they contribute no power)",
+            nc.instances, nc.masters, nc.analysable(), nc.physical_only, nc.unresolved_signal
+        ),
+    );
+
+    // Power needs leakage and internal-energy tables, not delay arcs, so the timing-oriented
+    // arc check is deliberately not repeated here — it would be a warning about something this
+    // engine does not use.
+    let lc = coverage::liberty(nl, lib);
+    emit(
+        lc.resolved_masters == 0,
+        "POWER-LIBERTY",
+        format!(
+            "liberty: {} cell(s) loaded, {} used by the design",
+            lc.cells_in_lib, lc.resolved_masters
+        ),
+    );
+
+    let mut nets: BTreeSet<&str> = BTreeSet::new();
+    for i in &nl.insts {
+        for (_pin, n) in &i.conns {
+            nets.insert(n.as_str());
+        }
+    }
+    for p in nl.inputs.iter().chain(nl.outputs.iter()) {
+        nets.insert(p.as_str());
+    }
+    let (hit, total) = act.coverage(nets.iter().copied());
+    let pct = if total == 0 { 0.0 } else { 100.0 * hit as f64 / total as f64 };
+    if act.mode() == "vectorless" {
+        emit(
+            false,
+            "POWER-ACTIVITY",
+            format!("activity: vectorless — a uniform estimate over all {total} net(s)"),
+        );
+    } else {
+        emit(
+            pct < 50.0,
+            "POWER-ACTIVITY",
+            format!(
+                "activity: {} names {hit} of {total} net(s) ({pct:.1}%); the remaining {} take \
+                 the vectorless fallback",
+                act.mode(),
+                total - hit
+            ),
+        );
+    }
+
+    if let Some(sp) = spef {
+        let sc = coverage::spef(nl, sp);
+        // Parasitics set wire capacitance here. Missing them under-reports switching power
+        // rather than invalidating the run, so this is quieter than the timing equivalent.
+        emit(
+            sc.read_but_unmatched() || sp.nets.is_empty(),
+            "POWER-SPEF",
+            format!(
+                "SPEF covers {} of {} design net(s) ({:.1}%); {} net(s) in the file",
+                sc.matched,
+                sc.design_nets,
+                sc.percent(),
+                sc.file_nets
+            ),
+        );
+    }
 }
 
 /// A tiny built-in design (no files needed) — `vyges-power demo`.

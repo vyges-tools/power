@@ -86,10 +86,73 @@ impl Activity {
         }
     }
 
+    /// How many of `nets` the activity source actually names.
+    ///
+    /// In `Vectored` mode a net the dump does not mention silently takes the vectorless
+    /// fallback — see [`Activity::rate`]. That is the right behaviour and the wrong silence: a
+    /// dump covering a fraction of the design still produces a report labelled "vectored", and
+    /// the numbers are then mostly the uniform estimate wearing a simulation's name. Callers use
+    /// this to say so.
+    pub fn coverage<'a>(&self, nets: impl Iterator<Item = &'a str>) -> (usize, usize) {
+        match self {
+            Activity::Vectorless { .. } => (0, nets.count()),
+            Activity::Vectored { src, .. } => {
+                let (mut hit, mut total) = (0usize, 0usize);
+                for n in nets {
+                    total += 1;
+                    if src.toggle_rate(n) > 0.0 {
+                        hit += 1;
+                    }
+                }
+                (hit, total)
+            }
+        }
+    }
+
     pub fn mode(&self) -> &'static str {
         match self {
             Activity::Vectored { label, .. } => label,
             Activity::Vectorless { .. } => "vectorless",
         }
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    struct Sparse;
+    impl ToggleSource for Sparse {
+        fn toggle_rate(&self, net: &str) -> f64 {
+            if net == "seen" { 1.0e6 } else { 0.0 }
+        }
+    }
+
+    #[test]
+    fn vectored_coverage_counts_only_the_nets_the_dump_names() {
+        // The number that makes a partly-covered dump legible. Without it a report labelled
+        // "vectored" over a design the dump barely touches is indistinguishable from one over a
+        // design it covers completely — and the difference is whether the figures mean anything.
+        let a = Activity::vectored(Sparse, "vectored (test)", 0.2, 1.0e9);
+        let (hit, total) = a.coverage(["seen", "unseen", "also_unseen"].into_iter());
+        assert_eq!((hit, total), (1, 3));
+    }
+
+    #[test]
+    fn vectorless_reports_no_net_as_covered() {
+        // Honest by construction: in vectorless mode every net takes the uniform estimate, so
+        // claiming coverage would be claiming a simulation that was never run.
+        let a = Activity::vectorless(0.2, 1.0e9);
+        let (hit, total) = a.coverage(["a", "b"].into_iter());
+        assert_eq!((hit, total), (0, 2));
+    }
+
+    #[test]
+    fn a_net_the_dump_does_not_name_still_gets_the_fallback_rate() {
+        // The behaviour the coverage number exists to disclose, pinned so the two stay in step:
+        // an unnamed net is not zero-power, it silently takes the vectorless estimate.
+        let a = Activity::vectored(Sparse, "vectored (test)", 0.2, 1.0e9);
+        assert!(a.rate("unseen") > 0.0, "an unnamed net falls back rather than reading zero");
+        assert_eq!(a.rate("seen"), 1.0e6);
     }
 }
