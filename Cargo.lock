@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "vyges-power"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "vyges-events",
  "vyges-loom",
