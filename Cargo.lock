@@ -118,8 +118,8 @@ dependencies = [
 
 [[package]]
 name = "vyges-loom"
-version = "0.1.18"
-source = "git+https://github.com/vyges-tools/loom?branch=main#b3c9da71140af7765b6f97127c867bf73e3817a3"
+version = "0.1.29"
+source = "git+https://github.com/vyges-tools/loom?branch=main#1a40a2fc41e3b5d6ea61d17169ee0fd207e8774e"
 dependencies = [
  "miniz_oxide",
 ]
