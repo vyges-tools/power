@@ -15,12 +15,12 @@ use vyges_power::job::PwrJob;
 use vyges_power::power::PowerReport;
 
 const USAGE: &str = "\
-vyges-power — gate-level power analysis (leakage + dynamic) with a CI gate
+vyges loom power — gate-level power analysis (leakage + dynamic) with a CI gate
 
 usage:
-  vyges-power run   JOB [-o OUT] [--json] [--fail-on-budget]
-  vyges-power check JOB
-  vyges-power demo       [-o OUT] [--json]
+  vyges loom power run   JOB [-o OUT] [--json] [--fail-on-budget]
+  vyges loom power check JOB
+  vyges loom power demo       [-o OUT] [--json]
 
 A JOB is a small declarative `.pwr` file (netlist + lib(s) + clock + activity).
 With `vcd:` or `saif:` it uses measured per-net toggle rates; otherwise a
