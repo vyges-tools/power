@@ -5,3 +5,4 @@
 dist/
 obj_dir/
 .cargo/config.toml
+counter-power.vcd

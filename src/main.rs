@@ -30,7 +30,8 @@ per-instance map that vyges-em-ir consumes (closing char -> power -> em-ir).
 With `activity_sweep: <from> <to> <window> [<step>]` (VCD only; `to` may be
 `end`) the same run reports power over the workload — one row per window, from
 a single parse of the dump — names the PEAK window, and hands em-ir the peak's
-activity map rather than the dump average.
+activity map rather than the dump average. `emit_power_vcd:` then writes that
+curve as a copy of the dump, viewable beside the workload in any VCD viewer.
 
 flags:
   -o FILE             write the report to FILE (default: stdout)
@@ -225,6 +226,17 @@ fn emit_sweep(job: &PwrJob, rep: &engine::SweepReport, cli: &Cli) -> ! {
     };
     write_out(&text, cli);
     write_activity_map(job, &rep.peak_report, Some(&label), cli);
+    if let Some(path) = &job.emit_power_vcd {
+        let resolved = job.resolve(path);
+        match engine::write_power_vcd(job, rep, &resolved) {
+            Ok(n) => {
+                if !cli.quiet {
+                    eprintln!("wrote power waveform ({n} value changes): {resolved}");
+                }
+            }
+            Err(e) => eprintln!("warning: could not write power waveform {resolved}: {e}"),
+        }
+    }
     budget_gate(job, peak.total_w(), cli);
     exit(0);
 }

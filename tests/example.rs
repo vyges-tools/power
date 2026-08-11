@@ -90,6 +90,53 @@ fn a_swept_window_agrees_with_the_same_window_measured_alone() {
 }
 
 #[test]
+fn the_power_waveform_is_the_dump_plus_the_curve() {
+    // The annotated copy has one job: let the numbers be read against the workload that
+    // produced them. That requires two things at once — the original dump has to survive
+    // untouched, and the curve has to be there. Losing either makes the file misleading rather
+    // than merely wrong: a viewer renders whatever it is given without comment.
+    let job = PwrJob::load("examples/counter/counter-sweep.pwr").expect("load job");
+    let rep = engine::analyze_sweep_job(&job).expect("sweep");
+    let out = std::env::temp_dir().join("vyges-power-waveform.vcd");
+    let out = out.to_str().unwrap();
+    engine::write_power_vcd(&job, &rep, out).expect("write waveform");
+
+    let before = Vcd::load("examples/counter/counter.vcd").expect("source dump");
+    let after = Vcd::load(out).expect("annotated dump reparses");
+    for (path, n) in &before.idx.toggles {
+        assert_eq!(
+            after.idx.toggles.get(path),
+            Some(n),
+            "{path} changed in the annotated copy"
+        );
+    }
+    assert!((before.sim_time_s - after.sim_time_s).abs() < 1e-18);
+
+    // Each series steps once per window after its initial value, and the peak window's value
+    // is the peak the report names — the curve and the table cannot disagree.
+    let text = std::fs::read_to_string(out).expect("read back");
+    for sig in [
+        "power_total_w",
+        "power_sequential_w",
+        "power_combinational_w",
+        "power_clock_w",
+    ] {
+        assert!(text.contains(sig), "missing series {sig}");
+        // Declared, not necessarily changing: on a library that names no sequential cell the
+        // sequential series is flat zero, and a signal that never moves has no transitions.
+        // A viewer still needs it declared to draw the line.
+        assert!(
+            after.idx.by_leaf.contains_key(sig),
+            "{sig} is not declared as a signal"
+        );
+    }
+    assert!(
+        text.contains(&format!("r{:.6e}", rep.peak_window().total_w())),
+        "the peak the report names is not in the waveform"
+    );
+}
+
+#[test]
 fn sweeping_does_not_invent_or_lose_transitions() {
     // The sweep's windows must partition the dump: every transition the whole-dump read sees
     // is counted in exactly one window. A sweep that drops the tail of a dump would quietly

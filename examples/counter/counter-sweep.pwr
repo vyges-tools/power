@@ -18,3 +18,4 @@ vcd:           counter.vcd     # vectored activity
 activity:      0.2             # vectorless fallback for nets absent from VCD/SPEF
 activity_sweep: 0ns end 10ns   # one measurement per clock period
 emit_activity: counter-peak.activity
+emit_power_vcd: counter-power.vcd  # the curve, viewable beside the workload

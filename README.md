@@ -97,6 +97,12 @@ delay-annotated flow (not modeled — see *Honest bounds*).
   loaded a single time and only the toggle counts differ per window, so measuring 400 windows
   costs one parse and one design load, not 400 of each. `step` defaults to `window`
   (consecutive); a smaller `step` overlaps, a larger one samples.
+- **The curve, beside the workload** — `emit_power_vcd:` (sweep only) writes a **copy** of the
+  activity VCD carrying `power_total_w`, `power_sequential_w`, `power_combinational_w` and
+  `power_clock_w` as real-valued signals under their own `power_sweep` scope, stepping at each
+  window boundary. Open it in GTKWave or Surfer to see which part of the workload was
+  expensive, against the stimulus that caused it. The source dump is never modified, and the
+  new signals take identifier codes the file does not already use.
 - **The em-ir seam** — `emit_activity:` writes a per-instance **average current** +
   toggle rate map; `vyges-em-ir` lands that current on the nearest supply node instead
   of assuming worst-case-simultaneous switching. Under a sweep the map is the **peak

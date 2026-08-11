@@ -18,6 +18,7 @@
 //! default_wire_cap: 0.0             # pF added to every net's switched cap (optional)
 //! power_budget_mw:  5.0             # optional CI gate (--fail-on-budget)
 //! emit_activity: block.activity     # optional: write the per-instance map em-ir consumes
+//! emit_power_vcd: block-power.vcd   # optional (sweep only): the power curve, as a VCD copy
 //! ```
 //!
 //! Activity has two vectored sources — a **VCD** or a **SAIF** (`saif`, e.g.
@@ -70,6 +71,10 @@ pub struct PwrJob {
     pub default_wire_cap_pf: f64, // pF added per net (crude wire-cap stand-in)
     pub power_budget_mw: Option<f64>, // CI gate with --fail-on-budget
     pub emit_activity: Option<String>,
+    /// Write a copy of the activity VCD carrying the swept power curve as extra signals, so
+    /// the result can be read in a waveform viewer against the workload that produced it.
+    /// Sweep-only — a single measurement is one number, and a number is not a curve.
+    pub emit_power_vcd: Option<String>,
     pub base_dir: String,
 }
 
@@ -289,6 +294,15 @@ impl PwrJob {
             ));
         }
 
+        // The power curve is written as a copy of the dump it was measured from, so it needs
+        // both a sweep to have a curve at all and the VCD to copy.
+        let emit_power_vcd = kv.get("emit_power_vcd").filter(|s| !s.is_empty()).cloned();
+        if emit_power_vcd.is_some() && activity_sweep.is_none() {
+            return Err(JobError(
+                "emit_power_vcd requires an 'activity_sweep:' — a single measurement is one number, not a curve".into(),
+            ));
+        }
+
         Ok(PwrJob {
             design: get("design")?,
             netlist: get("netlist")?,
@@ -307,6 +321,7 @@ impl PwrJob {
             default_wire_cap_pf: num("default_wire_cap", 0.0)?,
             power_budget_mw: kv.get("power_budget_mw").and_then(|s| s.parse().ok()),
             emit_activity: kv.get("emit_activity").filter(|s| !s.is_empty()).cloned(),
+            emit_power_vcd,
             base_dir: base_dir.to_string(),
         })
     }

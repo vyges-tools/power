@@ -181,6 +181,42 @@ impl SweepReport {
     }
 }
 
+/// Write the swept power curve as a copy of the activity VCD carrying four extra signals, so
+/// the numbers can be read in a waveform viewer **against the workload that produced them**.
+///
+/// A sweep answers "when", and a table of windows answers it in a form a person has to
+/// reassemble in their head. Next to the stimulus, the same numbers say *which part of the
+/// workload* was expensive — which is the question that leads to a fix.
+///
+/// The values step at window boundaries and hold, so the curve reads as the measurement it is:
+/// one level per window, not an interpolation between samples.
+pub fn write_power_vcd(job: &PwrJob, rep: &SweepReport, out_path: &str) -> Result<usize, String> {
+    let src = job
+        .vcd
+        .as_ref()
+        .ok_or_else(|| "no 'vcd:' to annotate".to_string())?;
+    let series = vec![
+        series_of("power_total_w", rep, |w| w.total_w()),
+        series_of("power_sequential_w", rep, |w| w.sequential_w),
+        series_of("power_combinational_w", rep, |w| w.combinational_w),
+        series_of("power_clock_w", rep, |w| w.clock_w),
+    ];
+    let stats = crate::vcd::annotate_reals(&job.resolve(src), out_path, "power_sweep", &series)
+        .map_err(|e| e.to_string())?;
+    Ok(stats.records)
+}
+
+fn series_of(
+    name: &str,
+    rep: &SweepReport,
+    pick: impl Fn(&WindowPower) -> f64,
+) -> crate::vcd::RealSeries {
+    crate::vcd::RealSeries {
+        name: name.to_string(),
+        points: rep.windows.iter().map(|w| (w.from_s, pick(w))).collect(),
+    }
+}
+
 /// Analyze a job that carries an `activity_sweep:` — power over the workload, from **one**
 /// parse of the dump.
 ///
