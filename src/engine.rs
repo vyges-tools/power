@@ -107,10 +107,206 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
         &nl,
         &lib,
         &act,
-        vdd,
-        wire_cap_f,
-        spef.as_ref(),
+        &power::AnalyzeOpts {
+            vdd,
+            wire_cap_f,
+            spef: spef.as_ref(),
+            clock_port: Some(&job.clock_port),
+        },
     ))
+}
+
+/// One window of a [`SweepReport`]: when it ran, how busy it was, and what it cost.
+#[derive(Debug, Clone)]
+pub struct WindowPower {
+    pub index: usize,
+    pub from_s: f64,
+    pub to_s: f64,
+    pub events: u64, // value changes in the window — 0 means nothing happened, not a failure
+    pub leakage_w: f64,
+    pub internal_w: f64,
+    pub switch_w: f64,
+    pub sequential_w: f64,
+    pub combinational_w: f64,
+    pub clock_w: f64,
+    pub covered_nets: usize,
+}
+
+impl WindowPower {
+    pub fn dynamic_w(&self) -> f64 {
+        self.internal_w + self.switch_w
+    }
+    pub fn total_w(&self) -> f64 {
+        self.leakage_w + self.dynamic_w()
+    }
+}
+
+/// Power over the workload: one row per measurement window, plus the **peak** window kept as
+/// a full [`PowerReport`].
+///
+/// The peak is the point of the sweep, not a summary of it. Average power over a whole dump is
+/// the wrong input for IR drop and electromigration — those are driven by the busiest window —
+/// and until now the choice was between a dump average (optimistic) and worst-case-simultaneous
+/// switching (pessimistic). The peak window is the third option, and it is measured.
+#[derive(Debug, Clone)]
+pub struct SweepReport {
+    pub design: String,
+    pub vdd: f64,
+    pub mode: String,
+    pub dump_end_s: f64,
+    pub windows: Vec<WindowPower>,
+    pub peak: usize,              // index into `windows`
+    pub peak_report: PowerReport, // the full per-instance report for the peak window
+}
+
+impl SweepReport {
+    pub fn peak_window(&self) -> &WindowPower {
+        &self.windows[self.peak]
+    }
+    /// Mean total power across the measured windows — what a whole-dump run reports.
+    pub fn mean_total_w(&self) -> f64 {
+        if self.windows.is_empty() {
+            return 0.0;
+        }
+        self.windows.iter().map(|w| w.total_w()).sum::<f64>() / self.windows.len() as f64
+    }
+    /// Peak / mean. The factor a dump-average activity map hides from `vyges-em-ir`.
+    pub fn peak_to_mean(&self) -> f64 {
+        let mean = self.mean_total_w();
+        if mean > 0.0 {
+            self.peak_window().total_w() / mean
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Analyze a job that carries an `activity_sweep:` — power over the workload, from **one**
+/// parse of the dump.
+///
+/// The netlist, libraries and parasitics are loaded once and every window is evaluated against
+/// them; only the toggle counts differ per window. Running the same sweep by re-invoking a
+/// whole-design power analysis per window would re-read all of it N times, which is what makes
+/// the obvious implementation of this slow rather than what makes it hard.
+pub fn analyze_sweep_job(job: &PwrJob) -> Result<SweepReport, String> {
+    let Some(sw) = job.activity_sweep else {
+        return Err("job has no activity_sweep:".to_string());
+    };
+    let vcd_path = job
+        .vcd
+        .as_ref()
+        .ok_or_else(|| "activity_sweep requires a 'vcd:' source".to_string())?;
+
+    let nl = netlist::load(&job.resolve(&job.netlist)).map_err(|e| e.to_string())?;
+    let mut lib: Option<Lib> = None;
+    for l in &job.libs {
+        let parsed = Lib::load_opts(&job.resolve(l), crate::liberty::LibOpts { skip_ccs: true })
+            .map_err(|e| e.to_string())?;
+        match &mut lib {
+            Some(acc) => acc.merge(parsed),
+            None => lib = Some(parsed),
+        }
+    }
+    let lib = lib.ok_or_else(|| "no libraries loaded".to_string())?;
+    let vdd = job.vdd.unwrap_or(lib.voltage);
+    let freq = job.freq_hz();
+    let spef = match &job.spef {
+        Some(p) => Some(Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?),
+        None => None,
+    };
+    let opts = power::AnalyzeOpts {
+        vdd,
+        wire_cap_f: job.default_wire_cap_pf * 1.0e-12,
+        spef: spef.as_ref(),
+        clock_port: Some(&job.clock_port),
+    };
+
+    let sweep = Vcd::load_sweep(
+        &job.resolve(vcd_path),
+        sw.from_s,
+        sw.to_s,
+        sw.window_s,
+        Some(sw.step_s),
+        job.scope.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    if sweep.windows.is_empty() {
+        return Err("activity_sweep measured no windows — check its range against the dump".into());
+    }
+
+    let mut nets: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for i in &nl.insts {
+        for (_pin, n) in &i.conns {
+            nets.insert(n.as_str());
+        }
+    }
+
+    let mut windows: Vec<WindowPower> = Vec::with_capacity(sweep.windows.len());
+    let mut peak = 0usize;
+    let mut peak_report: Option<PowerReport> = None;
+    for i in 0..sweep.windows.len() {
+        let act = Activity::vectored(
+            sweep.window(i),
+            "vectored (VCD sweep)",
+            job.activity_factor,
+            freq,
+        );
+        let rep = power::analyze(&nl, &lib, &act, &opts);
+        let w = &sweep.windows[i];
+        let (hit, _) = act.coverage(nets.iter().copied());
+        let row = WindowPower {
+            index: i,
+            from_s: w.from_s,
+            to_s: w.to_s,
+            events: w.events,
+            leakage_w: rep.leakage_w,
+            internal_w: rep.internal_w,
+            switch_w: rep.switch_w,
+            sequential_w: rep.group(power::Group::Sequential).total_w(),
+            combinational_w: rep.group(power::Group::Combinational).total_w(),
+            clock_w: rep.group(power::Group::Clock).total_w(),
+            covered_nets: hit,
+        };
+        // Strictly greater, so the earliest window wins a tie — a deterministic peak, and the
+        // first time the design got that busy is the more useful one to look at.
+        if peak_report.is_none() || row.total_w() > windows[peak].total_w() {
+            peak = i;
+            peak_report = Some(rep);
+        }
+        windows.push(row);
+    }
+    let peak_report = peak_report.expect("at least one window");
+
+    vyges_events::emit(
+        &Event::new(
+            "vyges-power",
+            Severity::Info,
+            format!(
+                "swept {} window(s) of {:.3} ns over one parse; peak window #{} [{:.3} ns, {:.3} ns) at {:.3} mW ({:.2}x the mean)",
+                windows.len(),
+                sw.window_s * 1e9,
+                peak,
+                windows[peak].from_s * 1e9,
+                windows[peak].to_s * 1e9,
+                windows[peak].total_w() * 1e3,
+                {
+                    let mean: f64 = windows.iter().map(|w| w.total_w()).sum::<f64>() / windows.len() as f64;
+                    if mean > 0.0 { windows[peak].total_w() / mean } else { 0.0 }
+                }
+            ),
+        )
+        .with_code("POWER-SWEEP"),
+    );
+
+    Ok(SweepReport {
+        design: nl.module.clone(),
+        vdd,
+        mode: "vectored (VCD sweep)".to_string(),
+        dump_end_s: sweep.dump_end_s,
+        windows,
+        peak,
+        peak_report,
+    })
 }
 
 /// Report how much of the design each input actually covers.
@@ -123,18 +319,17 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
 /// silently takes the vectorless fallback, so a dump covering a fraction of the design still
 /// produces a report labelled "vectored (VCD)" whose numbers are mostly the uniform estimate.
 /// Power figures get quoted, and nothing said so.
-fn emit_input_coverage(
-    nl: &netlist::Netlist,
-    lib: &Lib,
-    act: &Activity,
-    spef: Option<&Spef>,
-) {
+fn emit_input_coverage(nl: &netlist::Netlist, lib: &Lib, act: &Activity, spef: Option<&Spef>) {
     use std::collections::BTreeSet;
     use vyges_events::{Event, Severity};
     use vyges_loom::coverage;
 
     let emit = |attention: bool, code: &str, msg: String| {
-        let sev = if attention { Severity::Warn } else { Severity::Info };
+        let sev = if attention {
+            Severity::Warn
+        } else {
+            Severity::Info
+        };
         vyges_events::emit(&Event::new("vyges-power", sev, msg).with_code(code));
     };
 
@@ -147,9 +342,31 @@ fn emit_input_coverage(
         format!(
             "netlist: {} instance(s) of {} master(s); {} with a library cell, {} physical-only, \
              {} with signal pins have NO library cell (they contribute no power)",
-            nc.instances, nc.masters, nc.analysable(), nc.physical_only, nc.unresolved_signal
+            nc.instances,
+            nc.masters,
+            nc.analysable(),
+            nc.physical_only,
+            nc.unresolved_signal
         ),
     );
+
+    // Whether the library says enough to attribute power to the clock network. Reported here
+    // with the other input-coverage facts because that is what it is: a statement about what
+    // the inputs support, not about the design.
+    let declares_seq = nl
+        .insts
+        .iter()
+        .filter_map(|i| lib.cell(&i.cell))
+        .any(|c| c.is_seq || c.clock_pin.is_some());
+    if !declares_seq {
+        emit(
+            true,
+            "POWER-CLOCK-GROUPING",
+            "liberty: no cell declares an ff/latch group or a `clock : true` pin — the \
+             sequential/clock split falls back to cell shape (single-input repeaters only)"
+                .to_string(),
+        );
+    }
 
     // Power needs leakage and internal-energy tables, not delay arcs, so the timing-oriented
     // arc check is deliberately not repeated here — it would be a warning about something this
@@ -174,7 +391,11 @@ fn emit_input_coverage(
         nets.insert(p.as_str());
     }
     let (hit, total) = act.coverage(nets.iter().copied());
-    let pct = if total == 0 { 0.0 } else { 100.0 * hit as f64 / total as f64 };
+    let pct = if total == 0 {
+        0.0
+    } else {
+        100.0 * hit as f64 / total as f64
+    };
     if act.mode() == "vectorless" {
         emit(
             false,
@@ -218,7 +439,17 @@ pub fn demo() -> PowerReport {
     let lib = Lib::parse(DEMO_LIB).expect("demo lib");
     // vectorless: 20% activity at 100 MHz
     let act = Activity::vectorless(0.2, 1.0e8);
-    power::analyze(&nl, &lib, &act, lib.voltage, 0.0, None)
+    let vdd = lib.voltage;
+    power::analyze(
+        &nl,
+        &lib,
+        &act,
+        &power::AnalyzeOpts {
+            vdd,
+            clock_port: Some("clk"),
+            ..Default::default()
+        },
+    )
 }
 
 // ---- rendering -----------------------------------------------------------------
@@ -247,6 +478,31 @@ pub fn render_report(rep: &PowerReport) -> String {
     s.push_str(&format!("    net switching  {}\n", fmt_w(rep.switch_w)));
     let i_total: f64 = rep.insts.iter().map(|i| i.avg_current_a).sum();
     s.push_str(&format!("  avg current      {}\n\n", fmt_a(i_total)));
+
+    s.push_str("  by group:        instances     total      leak       dyn\n");
+    for g in power::Group::ALL {
+        let t = rep.group(g);
+        s.push_str(&format!(
+            "    {:<14} {:>9} {:>9} {:>9} {:>9}\n",
+            g.label(),
+            t.instances,
+            fmt_w(t.total_w()),
+            fmt_w(t.leakage_w),
+            fmt_w(t.dynamic_w()),
+        ));
+    }
+    s.push_str(&format!(
+        "  clock network is {:.1}% of total power\n",
+        rep.clock_share_pct()
+    ));
+    if rep.clock_grouping_approximate {
+        s.push_str(
+            "  [warn] the library declares no sequential cell and no clock pin — the group\n\
+             \x20        split is inferred from cell shape, and only repeater-shaped cells are\n\
+             \x20        counted as clock network\n",
+        );
+    }
+    s.push('\n');
 
     let mut top = rep.insts.clone();
     top.sort_by(|a, b| {
@@ -297,12 +553,118 @@ pub fn report_json(rep: &PowerReport) -> String {
         "  \"unmatched_cells\": [{}],\n",
         jlist(&rep.unmatched)
     ));
+    s.push_str(&format!(
+        "  \"clock_share_pct\": {:.3},\n",
+        rep.clock_share_pct()
+    ));
+    s.push_str("  \"by_group\": {\n");
+    for (k, g) in power::Group::ALL.iter().enumerate() {
+        let t = rep.group(*g);
+        let comma = if k + 1 < power::Group::ALL.len() {
+            ","
+        } else {
+            ""
+        };
+        s.push_str(&format!(
+            "    {}: {{\"instances\": {}, \"leakage_w\": {:.6e}, \"internal_w\": {:.6e}, \"switch_w\": {:.6e}, \"total_w\": {:.6e}}}{}\n",
+            jstr(g.label()), t.instances, t.leakage_w, t.internal_w, t.switch_w, t.total_w(), comma
+        ));
+    }
+    s.push_str("  },\n");
     s.push_str("  \"by_instance\": [\n");
     for (k, i) in rep.insts.iter().enumerate() {
         let comma = if k + 1 < rep.insts.len() { "," } else { "" };
         s.push_str(&format!(
-            "    {{\"instance\": {}, \"cell\": {}, \"total_w\": {:.6e}, \"avg_current_a\": {:.6e}, \"toggle_rate_hz\": {:.6e}}}{}\n",
-            jstr(&i.inst), jstr(&i.cell), i.total_w(), i.avg_current_a, i.toggle_rate, comma
+            "    {{\"instance\": {}, \"cell\": {}, \"group\": {}, \"total_w\": {:.6e}, \"avg_current_a\": {:.6e}, \"toggle_rate_hz\": {:.6e}}}{}\n",
+            jstr(&i.inst), jstr(&i.cell), jstr(i.group.label()), i.total_w(), i.avg_current_a, i.toggle_rate, comma
+        ));
+    }
+    s.push_str("  ]\n}\n");
+    s
+}
+
+/// The sweep as a person reads it: the peak first (it is the answer), then the curve.
+pub fn render_sweep(rep: &SweepReport) -> String {
+    let mut s = String::new();
+    let peak = rep.peak_window();
+    s.push_str(&format!("vyges-power — {} (sweep)\n", rep.design));
+    s.push_str(&format!("  supply (Vdd)     {:.3} V\n", rep.vdd));
+    s.push_str(&format!("  activity         {}\n", rep.mode));
+    s.push_str(&format!(
+        "  windows          {} over a {:.3} ns dump\n\n",
+        rep.windows.len(),
+        rep.dump_end_s * 1e9
+    ));
+    s.push_str(&format!(
+        "  PEAK window #{} [{:.3} ns, {:.3} ns)\n",
+        peak.index,
+        peak.from_s * 1e9,
+        peak.to_s * 1e9
+    ));
+    s.push_str(&format!("    total power    {}\n", fmt_w(peak.total_w())));
+    s.push_str(&format!("    leakage        {}\n", fmt_w(peak.leakage_w)));
+    s.push_str(&format!("    dynamic        {}\n", fmt_w(peak.dynamic_w())));
+    s.push_str(&format!(
+        "    seq/comb/clk   {} / {} / {}\n",
+        fmt_w(peak.sequential_w),
+        fmt_w(peak.combinational_w),
+        fmt_w(peak.clock_w)
+    ));
+    s.push_str(&format!(
+        "  mean power       {}  (peak is {:.2}x the mean)\n\n",
+        fmt_w(rep.mean_total_w()),
+        rep.peak_to_mean()
+    ));
+
+    s.push_str(
+        "  window   start(ns)     end(ns)   events      total       seq      comb       clk\n",
+    );
+    for w in &rep.windows {
+        s.push_str(&format!(
+            "  {:>6} {:>11.3} {:>11.3} {:>8} {:>10} {:>9} {:>9} {:>9}{}\n",
+            w.index,
+            w.from_s * 1e9,
+            w.to_s * 1e9,
+            w.events,
+            fmt_w(w.total_w()),
+            fmt_w(w.sequential_w),
+            fmt_w(w.combinational_w),
+            fmt_w(w.clock_w),
+            if w.index == rep.peak { "  <- peak" } else { "" },
+        ));
+    }
+    s
+}
+
+/// The sweep as a machine reads it: the series, and the peak named explicitly so a consumer
+/// does not have to re-derive which row mattered.
+pub fn sweep_json(rep: &SweepReport) -> String {
+    let mut s = String::new();
+    s.push_str("{\n");
+    s.push_str(&format!("  \"design\": {},\n", jstr(&rep.design)));
+    s.push_str(&format!("  \"vdd\": {:.6},\n", rep.vdd));
+    s.push_str(&format!("  \"activity_mode\": {},\n", jstr(&rep.mode)));
+    s.push_str(&format!("  \"dump_end_s\": {:.6e},\n", rep.dump_end_s));
+    s.push_str(&format!("  \"windows\": {},\n", rep.windows.len()));
+    s.push_str(&format!("  \"peak_index\": {},\n", rep.peak));
+    s.push_str(&format!(
+        "  \"peak_total_w\": {:.6e},\n",
+        rep.peak_window().total_w()
+    ));
+    s.push_str(&format!(
+        "  \"mean_total_w\": {:.6e},\n",
+        rep.mean_total_w()
+    ));
+    s.push_str(&format!("  \"peak_to_mean\": {:.6},\n", rep.peak_to_mean()));
+    s.push_str("  \"series\": [\n");
+    for (k, w) in rep.windows.iter().enumerate() {
+        let comma = if k + 1 < rep.windows.len() { "," } else { "" };
+        s.push_str(&format!(
+            "    {{\"index\": {}, \"from_s\": {:.6e}, \"to_s\": {:.6e}, \"events\": {}, \
+             \"internal_w\": {:.6e}, \"switch_w\": {:.6e}, \"leakage_w\": {:.6e}, \"total_w\": {:.6e}, \
+             \"sequential_w\": {:.6e}, \"combinational_w\": {:.6e}, \"clock_w\": {:.6e}, \"covered_nets\": {}}}{}\n",
+            w.index, w.from_s, w.to_s, w.events, w.internal_w, w.switch_w, w.leakage_w,
+            w.total_w(), w.sequential_w, w.combinational_w, w.clock_w, w.covered_nets, comma
         ));
     }
     s.push_str("  ]\n}\n");
@@ -399,9 +761,129 @@ library (demo) {
 }
 "#;
 
+/// The demo design against a library that declares what a real one declares: an `ff` group on
+/// the flop and `clock : true` on its clock pin. Used to test the clock/sequential split on the
+/// path a real PDK takes.
+#[cfg(test)]
+const DECLARED_LIB: &str = r#"
+library (declared) {
+  leakage_power_unit : 1nW;
+  time_unit : "1ns";
+  capacitive_load_unit (1, pf);
+  nom_voltage : 1.8;
+  cell (INV) {
+    cell_leakage_power : 2.0;
+    pin (A) { direction : input; capacitance : 0.004; }
+    pin (Y) { direction : output; function : "!A";
+      internal_power () { rise_power(t){ values("0.010"); } fall_power(t){ values("0.010"); } } }
+  }
+  cell (CLKBUF) {
+    cell_leakage_power : 4.0;
+    pin (A) { direction : input; capacitance : 0.005; }
+    pin (X) { direction : output; function : "A";
+      internal_power () { rise_power(t){ values("0.020"); } fall_power(t){ values("0.020"); } } }
+  }
+  cell (DFF) {
+    cell_leakage_power : 5.0;
+    ff (IQ, IQN) { clocked_on : "CK"; next_state : "D"; }
+    pin (CK) { direction : input; clock : true; capacitance : 0.006; }
+    pin (D)  { direction : input; capacitance : 0.004; }
+    pin (Q)  { direction : output;
+      internal_power () { rise_power(t){ values("0.030"); } fall_power(t){ values("0.030"); } } }
+  }
+}
+"#;
+
+/// A clock buffer feeding two flops, one of which drives an inverter — one instance of each
+/// group, so a misclassification cannot hide in a total.
+#[cfg(test)]
+const GROUPED_V: &str = r#"
+module grouped (clk_in, d, q0, q1, y);
+  input clk_in, d;
+  output q0, q1, y;
+  wire clk, n1;
+  CLKBUF u_clkbuf (.A(clk_in), .X(clk));
+  DFF    u_ff0    (.CK(clk), .D(d),  .Q(q0));
+  DFF    u_ff1    (.CK(clk), .D(n1), .Q(q1));
+  INV    u_inv    (.A(q0),   .Y(n1));
+  INV    u_out    (.A(n1),   .Y(y));
+endmodule
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grouped(lib_text: &str) -> PowerReport {
+        let nl = netlist::parse(GROUPED_V).expect("netlist");
+        let lib = Lib::parse(lib_text).expect("lib");
+        let act = Activity::vectorless(0.2, 1.0e8);
+        let vdd = lib.voltage;
+        power::analyze(
+            &nl,
+            &lib,
+            &act,
+            &power::AnalyzeOpts {
+                vdd,
+                clock_port: Some("clk"),
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_declaring_library_splits_clock_sequential_and_combinational() {
+        let rep = grouped(DECLARED_LIB);
+        assert!(!rep.clock_grouping_approximate);
+        let by = |g| rep.group(g).instances;
+        assert_eq!(by(power::Group::Clock), 1, "the clock buffer, and only it");
+        assert_eq!(by(power::Group::Sequential), 2, "both flops");
+        assert_eq!(by(power::Group::Combinational), 2, "both inverters");
+        // The groups partition the design — nothing counted twice, nothing dropped.
+        let sum: f64 = power::Group::ALL
+            .iter()
+            .map(|g| rep.group(*g).total_w())
+            .sum();
+        assert!((sum - rep.total_w()).abs() < 1e-18);
+        assert!(rep.clock_share_pct() > 0.0 && rep.clock_share_pct() < 100.0);
+    }
+
+    #[test]
+    fn clock_ness_stops_at_a_flops_clock_pin() {
+        // THE FAILURE THIS EXISTS TO PREVENT. Propagating through the flops marks q0, then n1,
+        // then y as clock nets, and the whole design reports as clock network — which is
+        // exactly what happened on the demo library before the clock pin was honoured. A
+        // designer reading "clock is 83% of your power" would go optimise a clock tree that was
+        // mostly registers and logic.
+        let rep = grouped(DECLARED_LIB);
+        let group_of = |inst: &str| {
+            rep.insts
+                .iter()
+                .find(|i| i.inst == inst)
+                .map(|i| i.group)
+                .expect("instance")
+        };
+        assert_eq!(group_of("u_clkbuf"), power::Group::Clock);
+        assert_eq!(group_of("u_ff0"), power::Group::Sequential);
+        assert_eq!(group_of("u_inv"), power::Group::Combinational);
+        assert_eq!(group_of("u_out"), power::Group::Combinational);
+    }
+
+    #[test]
+    fn an_under_specified_library_says_so_instead_of_guessing_wide() {
+        // DEMO_LIB declares no ff group and no clock pin. The engine cannot tell the flop from
+        // the buffer, so it falls back to shape — and, critically, flags that it did. Silence
+        // here would be a made-up number with a straight face.
+        let rep = grouped(DEMO_LIB);
+        assert!(rep.clock_grouping_approximate);
+        assert_eq!(rep.group(power::Group::Sequential).instances, 0);
+        assert!(
+            render_report(&rep).contains("[warn] the library declares no sequential cell"),
+            "the caveat has to reach the person reading the report"
+        );
+        // The two-input flops are not repeaters, so clock-ness stops at them anyway.
+        assert!(rep.group(power::Group::Clock).instances <= 1);
+    }
 
     #[test]
     fn demo_has_power_and_current() {

@@ -1,0 +1,20 @@
+# Power over the workload: the same design as counter.pwr, measured in 10 ns windows
+# instead of once over the whole dump.
+#
+# `activity_sweep: <from> <to> <window> [<step>]` — `to` may be `end`. The dump is parsed
+# ONCE and every window is measured from that single pass, so the cost is one parse and one
+# design load however many windows are asked for.
+#
+# emit_activity then carries the PEAK window rather than the dump average, because that is
+# the window vyges-em-ir needs: IR drop and electromigration are driven by the busiest
+# window, not by the mean.
+design:        counter
+netlist:       counter.v
+lib:           counter.lib
+clock:         clk 10.0        # 100 MHz
+vdd:           1.8
+spef:          counter.spef    # REAL extracted wire caps (vyges-extract run counter.ext)
+vcd:           counter.vcd     # vectored activity
+activity:      0.2             # vectorless fallback for nets absent from VCD/SPEF
+activity_sweep: 0ns end 10ns   # one measurement per clock period
+emit_activity: counter-peak.activity

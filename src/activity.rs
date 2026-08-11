@@ -12,9 +12,9 @@
 
 use crate::fst::Fst;
 use crate::saif::Saif;
-use crate::vcd::Vcd;
+use crate::vcd::{Vcd, WindowActivity};
 
-/// A measured per-net toggle-rate source (VCD, SAIF, or FST).
+/// A measured per-net toggle-rate source (VCD, SAIF, FST, or one window of a sweep).
 pub trait ToggleSource {
     fn toggle_rate(&self, net: &str) -> f64;
 }
@@ -37,9 +37,23 @@ impl ToggleSource for Fst {
     }
 }
 
-pub enum Activity {
+/// One window of a sweep is an ordinary toggle source — so a swept run and a single-window
+/// run go through the *same* power model, and a per-window number means exactly what the
+/// whole-dump number means.
+impl ToggleSource for WindowActivity<'_> {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        WindowActivity::toggle_rate(self, net)
+    }
+}
+
+/// The activity behind a power number.
+///
+/// Borrowed sources are allowed (`'a`): a sweep holds one parse of the dump and hands each
+/// window out as a borrow, so measuring 400 windows does not clone the dump's name index 400
+/// times. An owned source (a whole-dump `Vcd`/`Saif`/`Fst`) satisfies any `'a`.
+pub enum Activity<'a> {
     Vectored {
-        src: Box<dyn ToggleSource>,
+        src: Box<dyn ToggleSource + 'a>,
         fallback_rate: f64,
         label: &'static str,
     },
@@ -48,7 +62,7 @@ pub enum Activity {
     },
 }
 
-impl Activity {
+impl<'a> Activity<'a> {
     pub fn vectorless(activity_factor: f64, freq_hz: f64) -> Self {
         Activity::Vectorless {
             rate: activity_factor * freq_hz,
@@ -56,7 +70,7 @@ impl Activity {
     }
 
     /// Vectored activity from any toggle source; `label` names the source in reports.
-    pub fn vectored<S: ToggleSource + 'static>(
+    pub fn vectored<S: ToggleSource + 'a>(
         src: S,
         label: &'static str,
         activity_factor: f64,
@@ -88,12 +102,14 @@ impl Activity {
 
     /// How many of `nets` the activity source actually names.
     ///
+    /// (`'a` is the source's lifetime; `'b` here is the caller's net names — unrelated.)
+    ///
     /// In `Vectored` mode a net the dump does not mention silently takes the vectorless
     /// fallback — see [`Activity::rate`]. That is the right behaviour and the wrong silence: a
     /// dump covering a fraction of the design still produces a report labelled "vectored", and
     /// the numbers are then mostly the uniform estimate wearing a simulation's name. Callers use
     /// this to say so.
-    pub fn coverage<'a>(&self, nets: impl Iterator<Item = &'a str>) -> (usize, usize) {
+    pub fn coverage<'b>(&self, nets: impl Iterator<Item = &'b str>) -> (usize, usize) {
         match self {
             Activity::Vectorless { .. } => (0, nets.count()),
             Activity::Vectored { src, .. } => {
@@ -124,7 +140,11 @@ mod coverage_tests {
     struct Sparse;
     impl ToggleSource for Sparse {
         fn toggle_rate(&self, net: &str) -> f64 {
-            if net == "seen" { 1.0e6 } else { 0.0 }
+            if net == "seen" {
+                1.0e6
+            } else {
+                0.0
+            }
         }
     }
 
@@ -152,7 +172,10 @@ mod coverage_tests {
         // The behaviour the coverage number exists to disclose, pinned so the two stay in step:
         // an unnamed net is not zero-power, it silently takes the vectorless estimate.
         let a = Activity::vectored(Sparse, "vectored (test)", 0.2, 1.0e9);
-        assert!(a.rate("unseen") > 0.0, "an unnamed net falls back rather than reading zero");
+        assert!(
+            a.rate("unseen") > 0.0,
+            "an unnamed net falls back rather than reading zero"
+        );
         assert_eq!(a.rate("seen"), 1.0e6);
     }
 }

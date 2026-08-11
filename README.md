@@ -58,6 +58,7 @@ cargo build --release            # std-only, no external deps
 vyges-power run   examples/block/block.pwr            # text report
 vyges-power run   examples/block/block.pwr --json     # machine-readable
 vyges-power run   examples/block/block.pwr --fail-on-budget   # exit 3 over budget
+vyges-power run   examples/counter/counter-sweep.pwr  # power over the workload + peak window
 vyges-power demo                                      # built-in design, no files
 # common flags: -o FILE · --json · -q/--quiet · -v/--verbose · -h/--help · -V/--version
 ```
@@ -84,9 +85,24 @@ delay-annotated flow (not modeled — see *Honest bounds*).
   **SAIF** — e.g. Verilator `--trace-saif`; `read_saif` turns `TC`/`DURATION` into a
   toggle rate) or **vectorless** (a uniform `activity` factor × clock; also the
   fallback for nets absent from the dump — never silently zeroed).
+- **Groups** — every report splits power into **sequential / combinational / clock**, and
+  states the clock network's share of the total. The split comes from Liberty: a cell with an
+  `ff`/`latch` group is sequential, and the clock network is what a combinational cell drives
+  from the clock port. Propagation stops at a `clock : true` pin, so a flop's `Q` is data.
+  A library declaring neither is told apart by cell *shape* instead, and the report says so
+  rather than quietly reporting a design as 83 % clock network.
+- **Power over the workload** — `activity_sweep: <from> <to> <window> [<step>]` (VCD only;
+  `to` may be `end`) reports one row per window, names the **peak** window, and gives the
+  peak-to-mean ratio. The dump is parsed **once**: the netlist, libraries and parasitics are
+  loaded a single time and only the toggle counts differ per window, so measuring 400 windows
+  costs one parse and one design load, not 400 of each. `step` defaults to `window`
+  (consecutive); a smaller `step` overlaps, a larger one samples.
 - **The em-ir seam** — `emit_activity:` writes a per-instance **average current** +
   toggle rate map; `vyges-em-ir` lands that current on the nearest supply node instead
-  of assuming worst-case-simultaneous switching.
+  of assuming worst-case-simultaneous switching. Under a sweep the map is the **peak
+  window's**, and the file says which window it came from — IR drop and electromigration are
+  driven by the busiest window, so a dump average understates the droop exactly where it
+  matters.
 
 **Honest bounds (depth reserved).** v0's internal-energy model is a representative mean
 (real `internal_power` is per-arc / state- & path-dependent), vectorless is a uniform

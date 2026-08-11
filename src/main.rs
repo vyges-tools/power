@@ -27,6 +27,11 @@ With `vcd:` or `saif:` it uses measured per-net toggle rates; otherwise a
 vectorless `activity:` factor × clock. With `emit_activity:` it writes the
 per-instance map that vyges-em-ir consumes (closing char -> power -> em-ir).
 
+With `activity_sweep: <from> <to> <window> [<step>]` (VCD only; `to` may be
+`end`) the same run reports power over the workload — one row per window, from
+a single parse of the dump — names the PEAK window, and hands em-ir the peak's
+activity map rather than the dump average.
+
 flags:
   -o FILE             write the report to FILE (default: stdout)
   --json              machine-readable JSON instead of the text report
@@ -191,34 +196,77 @@ fn emit(job: Option<&PwrJob>, rep: &PowerReport, cli: &Cli) -> ! {
         engine::render_report(rep)
     };
     write_out(&text, cli);
-
     if let Some(job) = job {
-        if let Some(path) = &job.emit_activity {
-            let resolved = job.resolve(path);
-            match std::fs::write(&resolved, rep.activity_map()) {
-                Ok(_) => {
-                    if !cli.quiet {
-                        eprintln!("wrote em-ir activity map: {resolved}");
-                    }
+        write_activity_map(job, rep, None, cli);
+        budget_gate(job, rep.total_w(), cli);
+    }
+    exit(0);
+}
+
+/// Emit the sweep; write the **peak** window's activity map; gate on the peak.
+///
+/// Both of those are the point of sweeping. A budget checked against the average passes a
+/// design that browns out under its own worst window, and an activity map averaged over the
+/// whole dump hands `vyges-em-ir` a droop the silicon will not see.
+fn emit_sweep(job: &PwrJob, rep: &engine::SweepReport, cli: &Cli) -> ! {
+    let peak = rep.peak_window();
+    let label = format!(
+        "peak window #{} [{:.3} ns, {:.3} ns) of {} swept",
+        peak.index,
+        peak.from_s * 1e9,
+        peak.to_s * 1e9,
+        rep.windows.len()
+    );
+    emit_power_events(&rep.peak_report);
+    let text = if cli.json {
+        engine::sweep_json(rep)
+    } else {
+        engine::render_sweep(rep)
+    };
+    write_out(&text, cli);
+    write_activity_map(job, &rep.peak_report, Some(&label), cli);
+    budget_gate(job, peak.total_w(), cli);
+    exit(0);
+}
+
+fn write_activity_map(job: &PwrJob, rep: &PowerReport, window: Option<&str>, cli: &Cli) {
+    let Some(path) = &job.emit_activity else {
+        return;
+    };
+    let resolved = job.resolve(path);
+    match std::fs::write(&resolved, rep.activity_map_labelled(window)) {
+        Ok(_) => {
+            if !cli.quiet {
+                match window {
+                    Some(w) => eprintln!("wrote em-ir activity map ({w}): {resolved}"),
+                    None => eprintln!("wrote em-ir activity map: {resolved}"),
                 }
-                Err(e) => eprintln!("warning: could not write activity map {resolved}: {e}"),
             }
         }
-        if cli.fail_on_budget {
-            if let Some(budget_mw) = job.power_budget_mw {
-                let total_mw = rep.total_w() * 1e3;
-                if total_mw > budget_mw {
-                    if !cli.quiet {
-                        eprintln!("power OVER BUDGET: {total_mw:.3} mW > {budget_mw:.3} mW");
-                    }
-                    exit(3);
+        Err(e) => eprintln!("warning: could not write activity map {resolved}: {e}"),
+    }
+}
+
+fn budget_gate(job: &PwrJob, total_w: f64, cli: &Cli) {
+    if !cli.fail_on_budget {
+        return;
+    }
+    match job.power_budget_mw {
+        Some(budget_mw) => {
+            let total_mw = total_w * 1e3;
+            if total_mw > budget_mw {
+                if !cli.quiet {
+                    eprintln!("power OVER BUDGET: {total_mw:.3} mW > {budget_mw:.3} mW");
                 }
-            } else if !cli.quiet {
+                exit(3);
+            }
+        }
+        None => {
+            if !cli.quiet {
                 eprintln!("note: --fail-on-budget set but the job has no power_budget_mw");
             }
         }
     }
-    exit(0);
 }
 
 fn main() {
@@ -228,7 +276,7 @@ fn main() {
         const DESCRIBE: &str = r#"{
   "schema": "vyges-tool-descriptor/1.1",
   "name": "power",
-  "summary": "gate-level power analysis (leakage + dynamic) with a CI gate",
+  "summary": "gate-level power analysis (leakage + dynamic), per-group and over time, with a CI gate",
   "maturity": "workflow-validated",
   "provenance_limitations": [
       "The job names the netlist, Liberty and any VCD/SAIF activity; input_hash covers the job path and arguments, not their contents."
@@ -242,7 +290,7 @@ fn main() {
     "type": "object",
     "required": ["job"],
     "properties": {
-      "job": { "type": "string", "description": "path to the .pwr job file (netlist + lib(s) + clock + activity)" },
+      "job": { "type": "string", "description": "path to the .pwr job file (netlist + lib(s) + clock + activity; an activity_sweep: key reports power per window over the workload and gates on the peak)" },
       "out": { "type": "string", "description": "path to write the report to (default: stdout)" }
     }
   },
@@ -332,8 +380,17 @@ fn main() {
                     job.activity_desc()
                 );
             }
-            match engine::analyze_job(&job) {
-                Ok(rep) => emit(Some(&job), &rep, &cli),
+            // A job carrying `activity_sweep:` asks for power over the workload; everything
+            // else is the single measurement. One command either way — the job says which,
+            // and the CLI does not need a second verb to say the same thing.
+            let result = if job.activity_sweep.is_some() {
+                engine::analyze_sweep_job(&job).map(Ok)
+            } else {
+                engine::analyze_job(&job).map(Err)
+            };
+            match result {
+                Ok(Ok(sweep)) => emit_sweep(&job, &sweep, &cli),
+                Ok(Err(rep)) => emit(Some(&job), &rep, &cli),
                 Err(e) => {
                     eprintln!("error: {e}");
                     exit(1);

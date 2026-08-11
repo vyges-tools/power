@@ -13,6 +13,7 @@
 //! fst:           block.fst          # optional: vectored activity (FST binary); exclusive with vcd/saif
 //! scope:         tb.dut             # optional: instance path where the design's nets live
 //! activity_window: 200ns 1200ns     # optional (VCD only): count toggles in [from,to) only
+//! activity_sweep: 0ns end 50ns      # optional (VCD only): power per 50ns window, over time
 //! activity:      0.2                # vectorless default toggle factor (used when no vcd/saif)
 //! default_wire_cap: 0.0             # pF added to every net's switched cap (optional)
 //! power_budget_mw:  5.0             # optional CI gate (--fail-on-budget)
@@ -28,6 +29,28 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// A uniform sweep of measurement windows over the dump — the `activity_sweep:` key.
+///
+/// `from to window [step]`, each with a unit; `to` may be the word `end`. `step` defaults to
+/// `window` (consecutive, non-overlapping). A smaller step overlaps the windows, a larger one
+/// samples the dump instead of covering it.
+#[derive(Debug, Clone, Copy)]
+pub struct ActivitySweep {
+    pub from_s: f64,
+    pub to_s: Option<f64>, // None = to the end of the dump
+    pub window_s: f64,
+    pub step_s: f64,
+}
+
+impl ActivitySweep {
+    /// Windows this sweep would measure over a dump ending at `dump_end_s`. Used to refuse an
+    /// unreasonable request before reading the dump rather than after allocating for it.
+    pub fn window_count(&self, dump_end_s: f64) -> f64 {
+        let to = self.to_s.unwrap_or(dump_end_s);
+        ((to - self.from_s) / self.step_s).ceil().max(0.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PwrJob {
     pub design: String,
@@ -40,6 +63,7 @@ pub struct PwrJob {
     pub saif: Option<String>, // vectored activity source (SAIF); exclusive with vcd
     pub fst: Option<String>,  // vectored activity source (FST binary); exclusive with vcd/saif
     pub activity_window: Option<(f64, Option<f64>)>, // VCD-only: count [from, to) seconds; None=full dump
+    pub activity_sweep: Option<ActivitySweep>, // VCD-only: power over time; exclusive with activity_window
     pub scope: Option<String>, // design instance path in the VCD/SAIF (disambiguates leaf names)
     pub spef: Option<String>,  // extracted wire parasitics (from vyges-extract)
     pub activity_factor: f64,  // vectorless default toggle factor (0..1), default 0.2
@@ -62,6 +86,22 @@ impl PwrJob {
         } else {
             "vectorless".to_string()
         };
+        if let Some(s) = self.activity_sweep {
+            let to = match s.to_s {
+                Some(t) => format!("{:.3}ns", t * 1e9),
+                None => "end".to_string(),
+            };
+            let step = if (s.step_s - s.window_s).abs() < f64::EPSILON {
+                String::new()
+            } else {
+                format!(" step {:.3}ns", s.step_s * 1e9)
+            };
+            return format!(
+                "{base} sweep [{:.3}ns,{to}) window {:.3}ns{step}",
+                s.from_s * 1e9,
+                s.window_s * 1e9
+            );
+        }
         match self.activity_window {
             Some((f, Some(t))) => format!("{base} [{:.3}ns,{:.3}ns)", f * 1e9, t * 1e9),
             Some((f, None)) => format!("{base} [{:.3}ns,end)", f * 1e9),
@@ -182,6 +222,73 @@ impl PwrJob {
             ));
         }
 
+        // activity_sweep: `from to window [step]`, `to` may be `end`.
+        let activity_sweep = match kv.get("activity_sweep").filter(|s| !s.is_empty()) {
+            None => None,
+            Some(s) => {
+                let toks: Vec<&str> = s.split_whitespace().collect();
+                let (f, t, w, st) = match toks.as_slice() {
+                    [f, t, w] => (*f, *t, *w, None),
+                    [f, t, w, st] => (*f, *t, *w, Some(*st)),
+                    _ => {
+                        return Err(JobError(
+                            "activity_sweep needs 'from to window [step]' with units, e.g. '0ns end 50ns'"
+                                .into(),
+                        ))
+                    }
+                };
+                let from_s = parse_time(f)?;
+                // `end` sweeps to the end of the dump, so a job does not have to hard-code how
+                // long the simulation happened to run — the common case, and the one a
+                // hard-coded number silently truncates when the testbench grows.
+                let to_s = if t.eq_ignore_ascii_case("end") {
+                    None
+                } else {
+                    Some(parse_time(t)?)
+                };
+                let window_s = parse_time(w)?;
+                let step_s = match st {
+                    Some(x) => parse_time(x)?,
+                    None => window_s,
+                };
+                if window_s <= 0.0 || step_s <= 0.0 {
+                    return Err(JobError(
+                        "activity_sweep window and step must be positive durations".into(),
+                    ));
+                }
+                if let Some(to) = to_s {
+                    if to <= from_s {
+                        return Err(JobError(
+                            "activity_sweep 'to' must be greater than 'from'".into(),
+                        ));
+                    }
+                }
+                Some(ActivitySweep {
+                    from_s,
+                    to_s,
+                    window_s,
+                    step_s,
+                })
+            }
+        };
+        // One measurement or many, not both: a job asking for both is ambiguous about which
+        // number `--fail-on-budget` gates on, and guessing an answer to that is worse than
+        // asking.
+        if activity_sweep.is_some() && activity_window.is_some() {
+            return Err(JobError(
+                "give either activity_window (one measurement) or activity_sweep (many), not both"
+                    .into(),
+            ));
+        }
+        // The sweep needs a per-transition timeline AND per-window counts. The VCD reader has
+        // both; FST's reader windows but does not yet bucket, so accepting it here would
+        // silently measure something else.
+        if activity_sweep.is_some() && vcd.is_none() {
+            return Err(JobError(
+                "activity_sweep requires a 'vcd:' source (FST sweep is not implemented yet; SAIF is cumulative)".into(),
+            ));
+        }
+
         Ok(PwrJob {
             design: get("design")?,
             netlist: get("netlist")?,
@@ -193,6 +300,7 @@ impl PwrJob {
             saif,
             fst,
             activity_window,
+            activity_sweep,
             scope: kv.get("scope").filter(|s| !s.is_empty()).cloned(),
             spef: kv.get("spef").filter(|s| !s.is_empty()).cloned(),
             activity_factor: num("activity", 0.2)?,
@@ -327,6 +435,69 @@ mod tests {
         // saif + window -> error (SAIF is cumulative, cannot be windowed)
         assert!(PwrJob::parse(
             &format!("{WIN_BASE}saif: b.saif\nactivity_window: 200ns\n"),
+            ""
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn parses_activity_sweep() {
+        let j = PwrJob::parse(
+            &format!("{WIN_BASE}vcd: b.vcd\nactivity_sweep: 0ns 1us 50ns\n"),
+            "",
+        )
+        .unwrap();
+        let s = j.activity_sweep.unwrap();
+        assert!((s.from_s).abs() < 1e-18);
+        assert!((s.to_s.unwrap() - 1e-6).abs() < 1e-18);
+        assert!((s.window_s - 50e-9).abs() < 1e-18);
+        assert!(
+            (s.step_s - s.window_s).abs() < 1e-18,
+            "step defaults to window"
+        );
+        assert_eq!(s.window_count(1e-6), 20.0);
+        assert!(j.activity_desc().contains("sweep"));
+    }
+
+    #[test]
+    fn sweep_to_end_and_explicit_step() {
+        let j = PwrJob::parse(
+            &format!("{WIN_BASE}vcd: b.vcd\nactivity_sweep: 100ns end 50ns 25ns\n"),
+            "",
+        )
+        .unwrap();
+        let s = j.activity_sweep.unwrap();
+        assert!(s.to_s.is_none(), "`end` sweeps to the end of the dump");
+        assert!((s.step_s - 25e-9).abs() < 1e-18, "overlapping windows");
+        assert!(j.activity_desc().contains("step"));
+    }
+
+    #[test]
+    fn sweep_rejects_what_it_cannot_measure() {
+        let bad =
+            |line: &str| PwrJob::parse(&format!("{WIN_BASE}vcd: b.vcd\n{line}\n"), "").is_err();
+        assert!(bad("activity_sweep: 0ns 1us"), "needs from/to/window");
+        assert!(bad("activity_sweep: 0 1us 50ns"), "units are mandatory");
+        assert!(
+            bad("activity_sweep: 0ns 1us 0ns"),
+            "a zero window is not a measurement"
+        );
+        assert!(
+            bad("activity_sweep: 1us 100ns 50ns"),
+            "'to' must follow 'from'"
+        );
+        // One measurement or many, never both — otherwise --fail-on-budget is ambiguous.
+        assert!(bad(
+            "activity_sweep: 0ns 1us 50ns\nactivity_window: 0ns 1us"
+        ));
+        // The sweep needs per-window counts, which only the VCD reader produces today.
+        assert!(PwrJob::parse(
+            &format!("{WIN_BASE}saif: b.saif\nactivity_sweep: 0ns 1us 50ns\n"),
+            ""
+        )
+        .is_err());
+        assert!(PwrJob::parse(
+            &format!("{WIN_BASE}fst: b.fst\nactivity_sweep: 0ns 1us 50ns\n"),
             ""
         )
         .is_err());
