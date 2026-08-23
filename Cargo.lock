@@ -118,15 +118,15 @@ dependencies = [
 
 [[package]]
 name = "vyges-loom"
-version = "0.1.30"
-source = "git+https://github.com/vyges-tools/loom?branch=main#75be431b2ccdada9b8ed7dc0a461690d618fbbbb"
+version = "0.1.31"
+source = "git+https://github.com/vyges-tools/loom?branch=main#e2bc88705fa12745532199283e04352bf0c0d0c1"
 dependencies = [
  "miniz_oxide",
 ]
 
 [[package]]
 name = "vyges-power"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "vyges-events",
  "vyges-loom",
