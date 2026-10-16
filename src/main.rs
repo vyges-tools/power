@@ -14,6 +14,27 @@ use vyges_power::engine;
 use vyges_power::job::PwrJob;
 use vyges_power::power::PowerReport;
 
+/// A diagnostic as a structured event (`POWER-ERROR`, or `POWER-WARNING` for a warning; `vyges-events/1.0`)
+/// instead of a bare stderr line; text after a blank line (the usage) stays plain help.
+fn diag_line(msg: String) {
+    let (head, help) = match msg.split_once("\n\n") {
+        Some((h, rest)) => (h.to_string(), Some(rest.to_string())),
+        None => (msg, None),
+    };
+    let warn = head.starts_with("warning: ");
+    let text = head.strip_prefix("error: ").or_else(|| head.strip_prefix("warning: ")).unwrap_or(&head).to_string();
+    let (severity, code) = if warn { (vyges_events::Severity::Warn, "POWER-WARNING") } else { (vyges_events::Severity::Error, "POWER-ERROR") };
+    vyges_events::emit(&vyges_events::Event::new("vyges-power", severity, text).with_code(code));
+    if let Some(h) = help {
+        eprintln!("{h}");
+    }
+}
+
+macro_rules! diag {
+    ($($t:tt)*) => { diag_line(format!($($t)*)) };
+}
+
+
 const USAGE: &str = "\
 vyges loom power — gate-level power analysis (leakage + dynamic) with a CI gate
 
@@ -118,7 +139,7 @@ fn write_out(text: &str, cli: &Cli) {
                 }
             }
             Err(e) => {
-                eprintln!("error: {path}: {e}");
+                diag!("error: {path}: {e}");
                 exit(1);
             }
         },
@@ -234,7 +255,7 @@ fn emit_sweep(job: &PwrJob, rep: &engine::SweepReport, cli: &Cli) -> ! {
                     eprintln!("wrote power waveform ({n} value changes): {resolved}");
                 }
             }
-            Err(e) => eprintln!("warning: could not write power waveform {resolved}: {e}"),
+            Err(e) => diag!("warning: could not write power waveform {resolved}: {e}"),
         }
     }
     budget_gate(job, peak.total_w(), cli);
@@ -255,7 +276,7 @@ fn write_activity_map(job: &PwrJob, rep: &PowerReport, window: Option<&str>, cli
                 }
             }
         }
-        Err(e) => eprintln!("warning: could not write activity map {resolved}: {e}"),
+        Err(e) => diag!("warning: could not write activity map {resolved}: {e}"),
     }
 }
 
@@ -367,7 +388,7 @@ fn main() {
                     j.activity_desc()
                 ),
                 Err(e) => {
-                    eprintln!("error: {e}");
+                    diag!("error: {e}");
                     exit(2);
                 }
             }
@@ -380,7 +401,7 @@ fn main() {
             let job = match PwrJob::load(path) {
                 Ok(j) => j,
                 Err(e) => {
-                    eprintln!("error: {e}");
+                    diag!("error: {e}");
                     exit(2);
                 }
             };
@@ -404,7 +425,7 @@ fn main() {
                 Ok(Ok(sweep)) => emit_sweep(&job, &sweep, &cli),
                 Ok(Err(rep)) => emit(Some(&job), &rep, &cli),
                 Err(e) => {
-                    eprintln!("error: {e}");
+                    diag!("error: {e}");
                     exit(1);
                 }
             }
