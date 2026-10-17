@@ -99,7 +99,13 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
     };
     let wire_cap_f = job.default_wire_cap_pf * 1.0e-12;
     let spef = match &job.spef {
-        Some(p) => Some(Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?),
+        Some(p) => {
+            let mut s = Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?;
+            // a net tied to a port is named by the port in the netlist and by its wire in the
+            // SPEF; without this its wire cap is missed and the net's power reads low, silently
+            s.rename_to_design(&nl);
+            Some(s)
+        }
         None => None,
     };
     emit_input_coverage(&nl, &lib, &act, spef.as_ref());
@@ -247,7 +253,13 @@ pub fn analyze_sweep_job(job: &PwrJob) -> Result<SweepReport, String> {
     let vdd = job.vdd.unwrap_or(lib.voltage);
     let freq = job.freq_hz();
     let spef = match &job.spef {
-        Some(p) => Some(Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?),
+        Some(p) => {
+            let mut s = Spef::load(&job.resolve(p)).map_err(|e| e.to_string())?;
+            // a net tied to a port is named by the port in the netlist and by its wire in the
+            // SPEF; without this its wire cap is missed and the net's power reads low, silently
+            s.rename_to_design(&nl);
+            Some(s)
+        }
         None => None,
     };
     let opts = power::AnalyzeOpts {
