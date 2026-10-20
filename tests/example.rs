@@ -152,10 +152,10 @@ fn sweeping_does_not_invent_or_lose_transitions() {
     )
     .expect("sweep");
     for (path, n) in &whole.idx.toggles {
-        let summed: u64 = sweep
+        let summed: f64 = sweep
             .windows
             .iter()
-            .map(|w| w.toggles.get(path).copied().unwrap_or(0))
+            .map(|w| w.toggles.get(path).copied().unwrap_or(0.0))
             .sum();
         assert_eq!(summed, *n, "{path}: sweep {summed} vs whole dump {n}");
     }
