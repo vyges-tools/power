@@ -1,7 +1,7 @@
 (SAIFILE
   (SAIFVERSION "2.0")
   (DIRECTION "backward")
-  (DESIGN block)
+  (DESIGN "block")
   (DATE "Sun Jun 1 00:00:00 2026")
   (VENDOR "Vyges")
   (PROGRAM_NAME "vyges-power example")
