@@ -11,6 +11,8 @@
 //!   toggle-rate propagation through the netlist.)
 
 use crate::fst::Fst;
+use crate::liberty::Lib;
+use crate::names::PinPaths;
 use crate::saif::Saif;
 use crate::vcd::{Vcd, WindowActivity};
 
@@ -35,6 +37,48 @@ impl ToggleSource for Fst {
     fn toggle_rate(&self, net: &str) -> f64 {
         Fst::toggle_rate(self, net)
     }
+}
+
+/// A dump read by the reference's rule: a net's rate comes only from an entry naming one of its
+/// ports or instance pins ([`PinPaths`]); an entry naming a bare internal net counts for nothing,
+/// as the reference's VCD and SAIF readers annotate pins, never nets. This is what the engine
+/// reads; the net-keyed impls above stay for callers with no netlist.
+pub struct ByPins<S> {
+    pub src: S,
+    pub pins: std::sync::Arc<PinPaths>,
+}
+
+impl ToggleSource for ByPins<Vcd> {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        self.src.pin_rate(&self.pins, net)
+    }
+}
+
+impl ToggleSource for ByPins<Saif> {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        self.src.pin_rate(&self.pins, net)
+    }
+}
+
+impl ToggleSource for ByPins<Fst> {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        self.src.pin_rate(&self.pins, net)
+    }
+}
+
+impl ToggleSource for ByPins<WindowActivity<'_>> {
+    fn toggle_rate(&self, net: &str) -> f64 {
+        self.src.pin_rate(&self.pins, net)
+    }
+}
+
+/// The power/ground pins of a library cell: the liberty model keeps signal pins only (its
+/// `pg_pin` groups are not pins), so a pin a KNOWN cell does not list — by name or as a bit of a
+/// listed bus — is one. A cell the library does not have names none.
+pub fn is_pg_pin(lib: &Lib, cell: &str, pin: &str) -> bool {
+    let Some(c) = lib.cells.get(cell) else { return false };
+    let base = crate::names::split_bit_select(pin).0;
+    !c.pins.contains_key(pin) && !c.pins.contains_key(base)
 }
 
 /// One window of a sweep is an ordinary toggle source — so a swept run and a single-window

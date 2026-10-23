@@ -1,12 +1,16 @@
 $timescale 1ns $end
 $scope module counter $end
 $var wire 1 ! clk_in $end
-$var wire 1 @ clk $end
 $var wire 1 # d $end
-$var wire 1 % n0 $end
 $var wire 1 & y $end
 $var wire 1 ( q0 $end
 $var wire 1 ) q1 $end
+$scope module clkbuf $end
+$var wire 1 @ X $end
+$upscope $end
+$scope module u0 $end
+$var wire 1 % Y $end
+$upscope $end
 $upscope $end
 $enddefinitions $end
 $dumpvars

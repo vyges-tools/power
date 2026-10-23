@@ -1,4 +1,6 @@
-// Tiny gate-level block: NAND -> INV -> DFF. Matches tiny.lib + block.vcd.
+// Tiny gate-level block: NAND -> INV -> DFF. Matches tiny.lib + block.vcd. The dumps name the
+// internal nets by their driver PINS (u_nand/Y, u_inv/Y), as a gate-level simulation does: a
+// dump entry counts only when it names a port or an instance pin.
 module block (clk, a, b, q);
   input clk, a, b;
   output q;

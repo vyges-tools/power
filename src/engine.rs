@@ -4,7 +4,7 @@
 //! subprocess. `vyges-char` supplies the Liberty; an optional VCD or SAIF supplies
 //! real activity; the report's `activity_map()` is the seam out to `vyges-em-ir`.
 
-use crate::activity::Activity;
+use crate::activity::{is_pg_pin, Activity, ByPins};
 use crate::fst::Fst;
 use crate::job::PwrJob;
 use crate::liberty::Lib;
@@ -59,11 +59,13 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
             );
         }
     };
+    // Which dump entries annotate which nets: ports and instance pins only, as the reference reads.
+    let pins = || std::sync::Arc::new(crate::names::PinPaths::new(&nl, |c, p| is_pg_pin(&lib, c, p)));
     let act = if let Some(s) = &job.saif {
         let saif =
             Saif::load_scoped(&job.resolve(s), job.scope.clone()).map_err(|e| e.to_string())?;
         warn_collisions(saif.idx.colliding_leaves());
-        Activity::vectored(saif, "vectored (SAIF)", job.activity_factor, freq)
+        Activity::vectored(ByPins { src: saif, pins: pins() }, "vectored (SAIF)", job.activity_factor, freq)
     } else if let Some(v) = &job.vcd {
         let vcd = Vcd::load_scoped(&job.resolve(v), job.activity_window, job.scope.clone())
             .map_err(|e| e.to_string())?;
@@ -78,7 +80,7 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
             );
         }
         warn_collisions(vcd.idx.colliding_leaves());
-        Activity::vectored(vcd, "vectored (VCD)", job.activity_factor, freq)
+        Activity::vectored(ByPins { src: vcd, pins: pins() }, "vectored (VCD)", job.activity_factor, freq)
     } else if let Some(fp) = &job.fst {
         let fst = Fst::load_scoped(&job.resolve(fp), job.activity_window, job.scope.clone())
             .map_err(|e| e.to_string())?;
@@ -93,7 +95,7 @@ pub fn analyze_job(job: &PwrJob) -> Result<PowerReport, String> {
             );
         }
         warn_collisions(fst.idx.colliding_leaves());
-        Activity::vectored(fst, "vectored (FST)", job.activity_factor, freq)
+        Activity::vectored(ByPins { src: fst, pins: pins() }, "vectored (FST)", job.activity_factor, freq)
     } else {
         Activity::vectorless(job.activity_factor, freq)
     };
@@ -289,12 +291,14 @@ pub fn analyze_sweep_job(job: &PwrJob) -> Result<SweepReport, String> {
         }
     }
 
+    // ports and instance pins only, as the reference reads a dump; one map for every window
+    let pins = std::sync::Arc::new(crate::names::PinPaths::new(&nl, |c, p| is_pg_pin(&lib, c, p)));
     let mut windows: Vec<WindowPower> = Vec::with_capacity(sweep.windows.len());
     let mut peak = 0usize;
     let mut peak_report: Option<PowerReport> = None;
     for i in 0..sweep.windows.len() {
         let act = Activity::vectored(
-            sweep.window(i),
+            ByPins { src: sweep.window(i), pins: pins.clone() },
             "vectored (VCD sweep)",
             job.activity_factor,
             freq,
