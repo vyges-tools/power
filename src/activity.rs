@@ -39,10 +39,10 @@ impl ToggleSource for Fst {
     }
 }
 
-/// A dump read by the reference's rule: a net's rate comes only from an entry naming one of its
-/// ports or instance pins ([`PinPaths`]); an entry naming a bare internal net counts for nothing,
-/// as the reference's VCD and SAIF readers annotate pins, never nets. This is what the engine
-/// reads; the net-keyed impls above stay for callers with no netlist.
+/// A dump read by the reference's rule: the reference's readers annotate pins — a net's rate
+/// comes from an entry naming one of its ports or instance pins, or (SAIF, and a VCD net
+/// variable) from an entry naming the net itself, which annotates the net's pins ([`PinPaths`]).
+/// This is what the engine reads; the net-keyed impls above stay for callers with no netlist.
 pub struct ByPins<S> {
     pub src: S,
     pub pins: std::sync::Arc<PinPaths>,
