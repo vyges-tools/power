@@ -1,7 +1,5 @@
 # vyges-power
 
-**[Download Loom](https://vyges.com/products/vyges-cli/#install)** · install the free [Vyges CLI](https://vyges.com/products/vyges-cli/), then `vyges install loom`
-
 Gate-level **power analysis**: a netlist + timing libraries + an activity source
 in, per-instance leakage + dynamic power out — and the per-instance **activity map
 that `vyges-em-ir` consumes**, closing `char → power → em-ir`.
